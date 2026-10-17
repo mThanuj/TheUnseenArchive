@@ -12,11 +12,12 @@ import os
 
 import httpx
 
-from .base import LLMError, schema_guide
+from .base import LLMError, TransientLLMError, retry_after_seconds, schema_guide
 
 
 class OpenAICompatProvider:
-    def __init__(self, name: str, url: str, model: str, key_env: str, timeout_s: float = 300):
+    def __init__(self, name: str, url: str, model: str, key_env: str, timeout_s: float = 300,
+                 extra_body: dict | None = None):
         key = os.environ.get(key_env, "").strip()
         if not key or key.startswith("your-"):
             raise LLMError(f"{name}: set {key_env} in .env to use it")
@@ -25,6 +26,7 @@ class OpenAICompatProvider:
         self.model = model
         self._key = key
         self.timeout_s = timeout_s
+        self.extra_body = dict(extra_body or {})   # e.g. {"reasoning_effort": "low"} for gpt-oss
         self.json_mode = True
 
     def _headers(self) -> dict:
@@ -44,7 +46,8 @@ class OpenAICompatProvider:
         user = (f"{user}\n\nJSON fields to fill:\n{schema_guide(schema)}\n\n"
                 f"Answer with a single compact JSON object (no indentation, no commentary).")
         body = {"model": self.model, "temperature": temperature, "max_tokens": max_tokens,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                **self.extra_body}
         for _ in range(2):
             if self.json_mode:
                 body["response_format"] = {"type": "json_object"}
@@ -54,13 +57,16 @@ class OpenAICompatProvider:
                 r = httpx.post(f"{self.url}/chat/completions", json=body, headers=self._headers(),
                                timeout=self.timeout_s)
             except httpx.HTTPError as exc:
-                raise LLMError(f"{self.name} request failed: {exc!r}") from None
+                raise TransientLLMError(f"{self.name} request failed: {exc!r}") from None
             if r.status_code == 400 and self.json_mode and "response_format" in r.text:
                 self.json_mode = False          # model without JSON mode: rely on the prompt + validation
                 continue
             break
         if r.status_code == 429:
-            raise LLMError(f"{self.name}: rate limit / free quota reached ({r.text[:200]})")
+            raise TransientLLMError(f"{self.name}: rate limit / free quota reached ({r.text[:200]})",
+                                    retry_after_seconds(r.headers))
+        if r.status_code in (500, 502, 503, 504):
+            raise TransientLLMError(f"{self.name}: temporarily unavailable ({r.status_code})")
         if r.status_code in (401, 403):
             raise LLMError(f"{self.name}: API key rejected ({r.status_code})")
         if r.status_code == 404:

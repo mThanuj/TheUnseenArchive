@@ -29,7 +29,7 @@ def test_schema_is_self_contained():
 def test_schema_guide_lists_nested_fields_with_descriptions():
     from unseen.llm.base import schema_guide
     guide = schema_guide(inline_refs(StoryDraft.model_json_schema()))
-    assert "- scenes: list of objects (minItems=3/maxItems=10)" in guide
+    assert "- scenes: list of objects (minItems=3/maxItems=12)" in guide
     assert "- scenes[].video_prompt (string): final text-to-video prompt" in guide
     assert "- scenes[].device (string; one of: camcorder" in guide
     assert "- narration[].pause_after_s (number; min 0.0; max 3.0)" in guide
@@ -146,3 +146,12 @@ def test_first_person_slips_are_flagged_but_quotes_allowed(cfg):
     d["narration"][1]["text"] = "I watched the corridor light flicker."
     probs = validate_story(StoryDraft.model_validate(d), cfg, 30, "fiction_horror")
     assert any("line 2 uses I/me/my" in p for p in probs)
+
+
+def test_script_prompt_asks_for_an_exact_scene_count(cfg):
+    from storyfakes import CONCEPTS
+    from unseen.story.models import Concept
+    from unseen.story.prompts import scene_count, script_prompt
+    assert [scene_count(cfg, s) for s in (20, 30, 40, 50, 90)] == [5, 8, 10, 12, 12]
+    p = script_prompt(cfg, "fiction_horror", 40, Concept.model_validate(CONCEPTS["concepts"][0]), {}, {}, None)
+    assert "EXACTLY 10 scenes" in p and "at most 11 spoken words" in p

@@ -51,7 +51,7 @@ def build_provider(cfg: LLMCfg, name: str):
     if name in cfg.openai_compat:
         from ..llm.openai_compat import OpenAICompatProvider
         c = cfg.openai_compat[name]
-        return OpenAICompatProvider(name, c.url, c.model, c.key_env, c.timeout_s)
+        return OpenAICompatProvider(name, c.url, c.model, c.key_env, c.timeout_s, c.extra_body)
     known = ["ollama", "gemini", *cfg.openai_compat]
     raise ValueError(f"unknown LLM provider {name!r}; configured: {known}")
 
@@ -284,15 +284,16 @@ class StoryEngine:
         return best, best_c, revised, history
 
     def critic_provider(self):
-        """A different hosted model than the writer when available (models grade themselves kindly)."""
+        """Other hosted models than the writer, in preference order (models grade themselves kindly).
+
+        Returned as a fallback view that shares cool-downs with the writer's chain; the local model
+        is left out because an extra pass on the laptop CPU costs minutes."""
         from ..llm.fallback import FallbackProvider
         p = self.provider
         if isinstance(p, FallbackProvider):
-            writer = p.providers[p.active].name
-            others = [q for q in p.providers[p.active + 1:] + p.providers[:p.active]
-                      if q.name not in (writer, "ollama")]   # the local model is too slow to add a pass
-            if others:
-                return others[0]
+            view = p.excluding({p.name, "ollama"})
+            if view is not None:
+                return view
         return p
 
     def critique(self, draft: StoryDraft, category: str) -> Critique | None:

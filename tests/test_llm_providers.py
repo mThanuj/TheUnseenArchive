@@ -14,6 +14,7 @@ KEYS = ("GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KE
 class Resp:
     def __init__(self, status: int, body: dict | None = None, text: str = ""):
         self.status_code = status
+        self.headers = {}
         self._body = body or {}
         self.text = text or json.dumps(self._body)
 
@@ -173,3 +174,45 @@ def test_critic_is_a_different_hosted_model(tmp_path, monkeypatch):
     assert writer.calls == ["ConceptList", "StoryDraft"] and local.calls == []
     assert critic.calls == ["ConceptRatings", "Critique"]   # the critic rates concepts and the script
     assert [s["provider"] for s in record.llm] == ["gemini", "groq", "gemini", "groq"]
+
+
+def test_transient_errors_retry_then_cool_down_then_recover():
+    from unseen.llm.base import TransientLLMError
+
+    now = [0.0]
+    slept = []
+
+    class Flaky:
+        def __init__(self, name, failures):
+            self.name, self.model, self.failures, self.calls = name, name, failures, 0
+
+        def complete_json(self, *a):
+            self.calls += 1
+            if self.failures > 0:
+                self.failures -= 1
+                raise TransientLLMError(f"{self.name} 503 high demand")
+            return f"from {self.name}", {}
+
+    gemini, groq = Flaky("gemini", failures=1), Flaky("groq", failures=0)
+    fb = FallbackProvider([gemini, groq], log=lambda m: None, clock=lambda: now[0], sleep=slept.append)
+    assert fb.complete_json("s", "u", {}, 0, 1)[0] == "from gemini"     # one short retry was enough
+    assert slept == [5.0] and gemini.calls == 2 and groq.calls == 0
+
+    gemini.failures = 2                                                    # fails twice: cool down
+    assert fb.complete_json("s", "u", {}, 0, 1)[0] == "from groq"
+    now[0] = 30.0
+    assert fb.complete_json("s", "u", {}, 0, 1)[0] == "from groq"         # still cooling down
+    assert gemini.calls == 4
+    now[0] = 61.0
+    assert fb.complete_json("s", "u", {}, 0, 1)[0] == "from gemini"       # preferred again after cool-down
+    assert fb.name == "gemini"
+
+
+def test_critic_view_shares_cooldowns():
+    a, b, c = Stub("gemini"), Stub("groq"), Stub("ollama")
+    fb = FallbackProvider([a, b, c], log=lambda m: None)
+    view = fb.excluding({"gemini", "ollama"})
+    assert [p.name for p in view.providers] == ["groq"]
+    fb._cool_down("groq")
+    assert view._cool is fb._cool and "groq" in view._cool
+    assert fb.excluding({"gemini", "groq", "ollama"}) is None

@@ -14,7 +14,7 @@ import re
 
 import httpx
 
-from .base import LLMError
+from .base import LLMError, TransientLLMError, retry_after_seconds
 
 
 class GeminiProvider:
@@ -60,7 +60,7 @@ class GeminiProvider:
             return httpx.post(f"{self.url}/models/{model}:generateContent", json=body,
                               headers={"x-goog-api-key": self._key}, timeout=self.timeout_s)
         except httpx.HTTPError as exc:
-            raise LLMError(f"Gemini request failed: {exc!r}") from None
+            raise TransientLLMError(f"Gemini request failed: {exc!r}") from None
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:
@@ -95,7 +95,9 @@ class GeminiProvider:
                 self.log(f"  gemini model auto-selected: {model}")
             break
         if r.status_code == 429:
-            raise LLMError("Gemini free-tier rate limit reached; try later or use provider: ollama")
+            raise TransientLLMError("Gemini free-tier rate limit reached", retry_after_seconds(r.headers))
+        if r.status_code in (500, 502, 503, 504):
+            raise TransientLLMError(f"Gemini temporarily unavailable ({r.status_code}): {r.text[:160]}")
         if r.status_code == 404:
             raise LLMError(f"gemini: model '{self.model}' not found; run `uv run unseen llm-models --provider gemini`")
         if r.status_code != 200:

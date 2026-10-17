@@ -57,19 +57,26 @@ def concepts_prompt(cfg: StoryConfig, category: str, target_seconds: int, ingred
     return "\n\n".join(parts)
 
 
+def scene_count(cfg: StoryConfig, target_seconds: int) -> int:
+    ln = cfg.length
+    return max(3, min(ln.max_scenes, round(target_seconds / ln.scene_seconds.typical)))
+
+
 def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept: Concept,
                   ingredients: dict, devices: dict[str, str], claims: list[Claim] | None) -> str:
     r, ln = cfg.rules, cfg.length
-    words_target = round(target_seconds * ln.words_per_second * 0.85)
+    words_target = round(target_seconds * ln.words_per_second * 0.75)
+    n_scenes = scene_count(cfg, target_seconds)
+    per_scene = int(ln.scene_seconds.max * ln.words_per_second)
     device_lines = "\n".join(f"- {k}: {v}" for k, v in devices.items())
     parts = [
         f"Write the full Reel script for this concept ({CATEGORY_BRIEF[category]}):\n"
         f"{concept.model_dump_json(indent=2)}",
-        f"Timing: scenes add up to about {target_seconds} s; each scene is ONE generated video clip of "
-        f"{ln.scene_seconds.min:g}-{ln.scene_seconds.max:g} s (usually {ln.scene_seconds.typical:g} s); at most "
-        f"{ln.max_scenes} scenes. Narration totals about {words_target} spoken words (slow delivery, "
-        f"{ln.words_per_second} words per second, with pauses). A scene may have no narration (silence is "
-        f"powerful). Every narration line belongs to exactly one scene, in order.",
+        f"Timing: write EXACTLY {n_scenes} scenes (about {target_seconds} s in total); each scene is ONE "
+        f"generated video clip of {ln.scene_seconds.min:g}-{ln.scene_seconds.max:g} s (usually "
+        f"{ln.scene_seconds.typical:g} s). Narration totals about {words_target} spoken words, delivered slowly "
+        f"({ln.words_per_second} words per second). A scene holds at most {per_scene} spoken words; several "
+        f"scenes should be silent (silence is powerful). Every narration line belongs to exactly one scene, in order.",
         f"Recording devices (scene.device) and how they look:\n{device_lines}\n"
         f"Ingredients: {json.dumps(ingredients)}",
         "video_prompt rules (a text-to-video model renders each scene from this paragraph alone, so it "

@@ -34,6 +34,7 @@ class OpenAICompatCfg(BaseModel):
     model: str
     key_env: str
     timeout_s: float = 300
+    extra_body: dict = {}   # merged into each request, e.g. {"reasoning_effort": "low"}
 
 
 class LLMCfg(BaseModel):

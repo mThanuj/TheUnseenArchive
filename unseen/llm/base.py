@@ -23,6 +23,21 @@ class LLMError(RuntimeError):
     pass
 
 
+class TransientLLMError(LLMError):
+    """Rate limit, overload or timeout: worth retrying the same provider a bit later."""
+
+    def __init__(self, message: str, retry_after: float | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def retry_after_seconds(headers) -> float | None:
+    try:
+        return float(headers.get("retry-after")) if headers.get("retry-after") else None
+    except (TypeError, ValueError):
+        return None
+
+
 class Provider(Protocol):
     name: str
     model: str

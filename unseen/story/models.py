@@ -99,7 +99,7 @@ class StoryDraft(BaseModel):
     archive_entry: str = Field(description="catalogue line shown at the start, e.g. "
                                            "'ENTRY 0412 - Hi8 tape - recovered 2004, Ashby, Ohio'")
     narration: list[NarrationLine] = Field(min_length=3, max_length=24)
-    scenes: list[Scene] = Field(min_length=3, max_length=10)
+    scenes: list[Scene] = Field(min_length=3, max_length=12)
     ending_note: str = Field(description="one sentence: why the ending lands")
     tags: list[str] = Field(description="3-8 lowercase tags: setting, device, anomaly, era")
     caption: str = Field(description="Instagram caption draft, 1-3 short sentences, no hashtags")

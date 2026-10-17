@@ -35,10 +35,13 @@ llm:
       url: https://api.groq.com/openai/v1
       model: openai/gpt-oss-120b # largest model on the key (also: openai/gpt-oss-20b, qwen/qwen3.8-27b)
       key_env: GROQ_API_KEY
+      # gpt-oss is a reasoning model: hidden reasoning counts against max_tokens and cut scripts off
+      extra_body: { reasoning_effort: low }
     cerebras: # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
       url: https://api.cerebras.ai/v1
       model: gpt-oss-120b
       key_env: CEREBRAS_API_KEY
+      extra_body: { reasoning_effort: low }
     openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY; ":free" models are rate-capped
       url: https://openrouter.ai/api/v1
       model: "google/gemma-4-31b-it:free" # free; alternatives: nvidia/nemotron-3-ultra-550b-a55b:free, thinkingmachines/inkling:free
@@ -73,7 +76,7 @@ length: # varied on purpose; seconds of finished Reel
     ]
   words_per_second: 2.3 # slow, suspenseful narration including pauses
   scene_seconds: { min: 2.0, max: 5.0, typical: 4.0 }
-  max_scenes: 10
+  max_scenes: 12 # one generated clip per scene: also the per-Reel GPU budget
 
 # Ingredients are sampled per story (and cooled down for a few days) to force variety.
 ingredients:
