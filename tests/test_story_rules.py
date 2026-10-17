@@ -129,7 +129,7 @@ def test_generate_retries_invalid_json_then_semantic_problems(cfg):
 
 def test_generate_gives_up_with_clear_error():
     provider = FakeProvider({"Critique": ["nope"]})
-    with pytest.raises(LLMError):
+    with pytest.raises(LLMError, match="output starts: 'nope'"):
         generate(provider, Critique, system="s", user="u", name="critique", max_retries=1, log=lambda m: None)
     provider = FakeProvider({"Critique": [CRITIQUE_PASS]})
     obj, _, _ = generate(provider, Critique, system="s", user="u", name="critique", log=lambda m: None)

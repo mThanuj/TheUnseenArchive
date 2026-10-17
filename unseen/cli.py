@@ -213,7 +213,7 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
     print("Speed test: a 4-line structured micro-story ...")
     obj, stats, _ = generate(provider, SpeedTest, system="You write eerie, restrained micro-fiction. Answer in JSON.",
                              user="Write a 4-line micro-story: the last log entry of a lighthouse keeper.",
-                             name="speed-test", temperature=0.7, max_tokens=400, max_retries=1)
+                             name="speed-test", temperature=0.7, max_tokens=1000, max_retries=1)
     print(f"\n{obj.title}\n  " + "\n  ".join(obj.lines))
     print(f"\n{stats.output_tokens} tokens in {stats.seconds} s ({stats.tokens_per_s} tok/s incl. prompt "
           f"processing and model load). A full story needs ~6-10k tokens across 3-4 calls.")
@@ -221,6 +221,27 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
     if unload:
         unload()
     return 0
+
+
+def cmd_topics(args: argparse.Namespace) -> int:
+    """Check every real-mystery topic title against Wikipedia (no LLM involved)."""
+    from datetime import datetime
+    from .story.config import load_story_config, load_topics
+    from .story.research import ResearchError, fetch_article
+    cfg, year = load_story_config(), datetime.now().year
+    bad = 0
+    for t in load_topics():
+        eligible = t.sensitivity == "low" or year - t.year >= cfg.real_mystery.min_years_ago_sensitive
+        try:
+            text, src = fetch_article(t.wikipedia)
+            resolved = src.title.removeprefix("Wikipedia: ")
+            note = "" if resolved == t.wikipedia else f"  (resolved to '{resolved}': update config/topics.yaml)"
+            print(f"[ok]   {t.id:16} {len(text):>7} chars  {'' if eligible else '(not eligible) '}{note}")
+        except ResearchError as exc:
+            bad += 1
+            print(f"[FAIL] {t.id:16} {exc}")
+    print(f"\n{bad} topic(s) failed." if bad else "\nAll topics resolve.")
+    return 1 if bad else 0
 
 
 def cmd_story_new(args: argparse.Namespace) -> int:
@@ -372,6 +393,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("llm-setup", help="check the LLM provider, pull the model, measure speed")
     p.add_argument("--provider", choices=["ollama", "gemini"], help="default: config/story.yaml")
     p.set_defaults(func=cmd_llm_setup)
+
+    p = sub.add_parser("topics", help="check every real-mystery topic title against Wikipedia")
+    p.set_defaults(func=cmd_topics)
 
     story = sub.add_parser("story", help="Milestone 2: write, list, show and render stories")
     ssub = story.add_subparsers(dest="story_command", required=True)

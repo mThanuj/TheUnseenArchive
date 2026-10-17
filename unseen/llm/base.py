@@ -142,10 +142,14 @@ def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, 
         try:
             obj = model_cls.model_validate(json.loads(extract_json(raw)))
         except (ValueError, ValidationError) as exc:
+            detail = (f"{str(exc)[:800]} | output starts: {raw[:300]!r} | done_reason="
+                      f"{usage.get('done_reason')} thinking_chars={usage.get('thinking_chars')} "
+                      f"output_tokens={usage.get('output_tokens')}")
+            log(f"  llm[{name}] invalid output: {detail[:400]}")
             if stats.attempts > max_retries:
                 if best:
                     return best[0], stats, best[1]
-                raise LLMError(f"{name}: invalid output after {stats.attempts} attempts: {str(exc)[:800]}")
+                raise LLMError(f"{name}: invalid output after {stats.attempts} attempts: {detail}")
             prompt = (f"{user}\n\nYour previous answer was not valid JSON for the schema:\n{str(exc)[:1500]}\n"
                       f"Return ONLY the corrected JSON object.")
             continue

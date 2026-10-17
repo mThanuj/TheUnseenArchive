@@ -107,6 +107,52 @@ def test_topic_eligibility_respects_sensitivity(env):
     assert {t.id for t in engine.eligible_topics()} == {"old_deaths", "recent_lights"}
 
 
+def test_failed_topic_falls_back_to_another(env):
+    d = draft_dict()
+    for n in d["narration"]:
+        n["claim_ids"] = [1]
+
+    def flaky_fetch(title):
+        if title == "Broken title":
+            raise ResearchError("Wikipedia has no article 'Broken title'")
+        return fake_fetch(title)
+
+    topics = [Topic(id="broken", wikipedia="Broken title", year=1900, kind="x", sensitivity="low"),
+              Topic(id="good", wikipedia="Example lights", year=1981, kind="lights", sensitivity="low")]
+    provider = FakeProvider({"ClaimList": [CLAIMS], "ConceptList": [CONCEPTS], "StoryDraft": [d],
+                             "Critique": [CRITIQUE_PASS]})
+    for seed in range(4):   # whichever topic is picked first, the story must end up on "good"
+        engine = StoryEngine(provider=provider, db=StateDB(env / f"t{seed}.db"), embedder=FakeEmbedder(),
+                             seed=seed, fetch=flaky_fetch, topics=topics, log=lambda m: None)
+        record, _ = engine.new_story(category="real_mystery", target_seconds=30)
+        assert record.topic_id == "good"
+
+
+def test_wikipedia_search_fallback(monkeypatch):
+    import unseen.story.research as research
+    article = {"query": {"pages": [{"title": "Gef", "extract": "Gef was a talking mongoose. " * 40,
+                                    "fullurl": "https://en.wikipedia.org/wiki/Gef", "revisions": [{"revid": 5}]}]}}
+    calls = []
+
+    def fake_api(params, timeout=30):
+        calls.append(params.get("titles") or params.get("srsearch"))
+        if params.get("list") == "search":
+            return {"query": {"search": [{"title": "Gef"}]}}
+        if params.get("titles") == "Gef (mongoose)":
+            return {"query": {"pages": [{"title": "Gef (mongoose)", "missing": True}]}}
+        return article
+
+    monkeypatch.setattr(research, "_api", fake_api)
+    text, src = research.fetch_article("Gef (mongoose)")
+    assert src.title == "Wikipedia: Gef" and calls == ["Gef (mongoose)", "Gef (mongoose)", "Gef"]
+
+    monkeypatch.setattr(research, "_api", lambda params, timeout=30: (
+        {"query": {"search": [{"title": "Completely unrelated page"}]}} if params.get("list")
+        else {"query": {"pages": [{"title": "Nope", "missing": True}]}}))
+    with pytest.raises(ResearchError):
+        research.fetch_article("Gef (mongoose)")
+
+
 def test_wikipedia_parsing_and_trimming():
     data = {"query": {"pages": [{"pageid": 1, "title": "Mary Celeste", "extract": "Lead. " * 200 + "\nReferences\njunk",
                                  "fullurl": "https://en.wikipedia.org/wiki/Mary_Celeste",

@@ -12,6 +12,7 @@ class OllamaCfg(BaseModel):
     model: str
     num_ctx: int = 8192
     timeout_s: float = 2400
+    think: bool | str = False
 
 
 class GeminiCfg(BaseModel):

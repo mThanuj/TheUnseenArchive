@@ -35,7 +35,8 @@ def make_provider(cfg: LLMCfg, name: str | None = None):
     name = name or cfg.provider
     if name == "ollama":
         from ..llm.ollama import OllamaProvider
-        return OllamaProvider(cfg.ollama.url, cfg.ollama.model, cfg.ollama.num_ctx, cfg.ollama.timeout_s)
+        return OllamaProvider(cfg.ollama.url, cfg.ollama.model, cfg.ollama.num_ctx, cfg.ollama.timeout_s,
+                              think=cfg.ollama.think)
     if name == "gemini":
         from ..llm.gemini import GeminiProvider
         return GeminiProvider(cfg.gemini.url, cfg.gemini.model, cfg.gemini.timeout_s)
@@ -106,18 +107,41 @@ class StoryEngine:
         limit = self.cfg.real_mystery.min_years_ago_sensitive
         return [t for t in self.topics if t.sensitivity == "low" or year - t.year >= limit]
 
-    def pick_topic(self, topic_id: str | None = None) -> Topic:
+    def pick_topic(self, topic_id: str | None = None, exclude: set[str] | None = None) -> Topic:
         eligible = self.eligible_topics()
         if topic_id:
             for t in eligible:
                 if t.id == topic_id:
                     return t
             raise ValueError(f"topic {topic_id!r} not found or not eligible; see config/topics.yaml")
+        eligible = [t for t in eligible if t.id not in (exclude or set())]
+        if not eligible:
+            raise ValueError("no eligible topics left in config/topics.yaml")
         used = self.db.used_topics()
         fresh = [t for t in eligible if t.id not in used]
-        if not eligible:
-            raise ValueError("no eligible topics in config/topics.yaml")
         return self.rng.choice(fresh or eligible)
+
+    def research_some_topic(self, topic_id: str | None, attempts: int = 3) -> tuple[Topic, list[Claim], Source]:
+        """Research a topic; if one fails (missing article, too few verifiable claims), try another."""
+        tried: set[str] = set()
+        last_error: Exception | None = None
+        for i in range(1 if topic_id else attempts):
+            try:
+                topic = self.pick_topic(topic_id, exclude=tried)
+            except ValueError:
+                if last_error:
+                    raise last_error   # ran out of topics: report the real research failure
+                raise
+            try:
+                claims, source = self.research(topic)
+                return topic, claims, source
+            except (ResearchError, LLMError) as exc:
+                tried.add(topic.id)
+                last_error = exc
+                self.log(f"  research failed for {topic.id}: {exc}")
+                if topic_id or i == attempts - 1:
+                    raise
+        raise ResearchError("no topic could be researched")
 
     # ------------------------------------------------------------------ steps
     def _gen(self, model_cls, *, user: str, name: str, temperature: float, max_tokens: int, check=None):
@@ -174,8 +198,7 @@ class StoryEngine:
         ingredients = {} if category == "real_mystery" else self.sample_ingredients()
         topic, claims, sources = None, None, []
         if category == "real_mystery":
-            topic = self.pick_topic(topic_id)
-            claims, source = self.research(topic)
+            topic, claims, source = self.research_some_topic(topic_id)
             sources = [source]
         self.log(f"New story: {category}, ~{target} s" + (f", topic {topic.id}" if topic else
                                                           f", ingredients {ingredients}"))

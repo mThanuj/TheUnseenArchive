@@ -43,6 +43,7 @@ git pull; uv sync
 uv run pytest
 uv run unseen llm-setup                          # pulls Gemma 4 12B (~7 GB, Apache-2.0) and measures speed
 uv run unseen story new                          # random category (~10-25 min on CPU)
+uv run unseen topics                             # checks every real-mystery Wikipedia title
 uv run unseen story new --category real_mystery  # or --topic max_headroom (see config/topics.yaml)
 uv run unseen story list
 uv run unseen story show <id>                    # same as runs\stories\<id>\story.md

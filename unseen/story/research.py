@@ -7,6 +7,7 @@ article URL, revision id and license with every story for attribution.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -27,7 +28,8 @@ def parse_article(data: dict) -> tuple[str, Source]:
     """(plain text, Source) from a formatversion=2 `action=query` response."""
     pages = (data.get("query") or {}).get("pages") or []
     if not pages or pages[0].get("missing") or pages[0].get("invalid"):
-        raise ResearchError(f"Wikipedia article not found: {data}")
+        title = pages[0].get("title") if pages else "?"
+        raise ResearchError(f"Wikipedia article not found: '{title}'")
     p = pages[0]
     text = p.get("extract") or ""
     if len(text) < 500:
@@ -44,19 +46,45 @@ def parse_article(data: dict) -> tuple[str, Source]:
     return text, src
 
 
-def fetch_article(title: str, timeout: float = 30) -> tuple[str, Source]:
-    params = {
-        "action": "query", "format": "json", "formatversion": "2", "redirects": "1",
-        "titles": title, "prop": "extracts|info|extlinks|revisions",
-        "explaintext": "1", "exsectionformat": "plain", "inprop": "url",
-        "ellimit": "max", "rvprop": "ids|timestamp",
-    }
+def _api(params: dict, timeout: float = 30) -> dict:
     try:
-        r = httpx.get(API, params=params, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+        r = httpx.get(API, params={"format": "json", "formatversion": "2", **params},
+                      headers={"User-Agent": USER_AGENT}, timeout=timeout)
         r.raise_for_status()
+        return r.json()
     except httpx.HTTPError as exc:
-        raise ResearchError(f"Wikipedia request failed for '{title}': {exc!r}") from None
-    return parse_article(r.json())
+        raise ResearchError(f"Wikipedia request failed: {exc!r}") from None
+
+
+def _significant(text: str) -> set[str]:
+    stop = {"the", "of", "a", "an", "and", "in", "on", "incident", "event", "mystery", "case"}
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in stop and len(w) > 1}
+
+
+def search_title(query: str) -> str | None:
+    """Best matching article title, only if it shares a significant word with the query."""
+    data = _api({"action": "query", "list": "search", "srsearch": query, "srlimit": "3"})
+    for hit in (data.get("query") or {}).get("search") or []:
+        if _significant(hit.get("title", "")) & _significant(query):
+            return hit["title"]
+    return None
+
+
+def fetch_article(title: str, timeout: float = 30) -> tuple[str, Source]:
+    """Article text + Source. A title that doesn't exist falls back to Wikipedia search."""
+    params = {
+        "action": "query", "redirects": "1", "titles": title,
+        "prop": "extracts|info|extlinks|revisions", "explaintext": "1", "exsectionformat": "plain",
+        "inprop": "url", "ellimit": "max", "rvprop": "ids|timestamp",
+    }
+    data = _api(params, timeout)
+    pages = (data.get("query") or {}).get("pages") or []
+    if pages and pages[0].get("missing"):
+        found = search_title(title)
+        if not found:
+            raise ResearchError(f"Wikipedia has no article '{title}' and search found no close match")
+        data = _api({**params, "titles": found}, timeout)
+    return parse_article(data)
 
 
 def trim_source(text: str, max_chars: int) -> str:

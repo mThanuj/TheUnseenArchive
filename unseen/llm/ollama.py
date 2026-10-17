@@ -24,11 +24,13 @@ def _same_model(a: str, b: str) -> bool:
 class OllamaProvider:
     name = "ollama"
 
-    def __init__(self, url: str, model: str, num_ctx: int = 8192, timeout_s: float = 2400):
+    def __init__(self, url: str, model: str, num_ctx: int = 8192, timeout_s: float = 2400,
+                 think: bool | str = False):
         self.url = url.rstrip("/")
         self.model = model
         self.num_ctx = num_ctx
         self.timeout_s = timeout_s
+        self.think = think
 
     def version(self) -> str:
         try:
@@ -75,6 +77,7 @@ class OllamaProvider:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "format": schema,
             "stream": False,
+            "think": self.think,
             "keep_alive": "10m",
             "options": {"temperature": temperature, "num_ctx": self.num_ctx, "num_predict": max_tokens},
         }
@@ -85,10 +88,12 @@ class OllamaProvider:
         if r.status_code != 200:
             raise LLMError(f"Ollama returned {r.status_code}: {r.text[:800]}")
         d = r.json()
+        msg = d.get("message") or {}
         usage = {"prompt_tokens": d.get("prompt_eval_count"), "output_tokens": d.get("eval_count"),
                  "eval_s": (d.get("eval_duration") or 0) / 1e9,
-                 "prompt_s": (d.get("prompt_eval_duration") or 0) / 1e9}
-        return (d.get("message") or {}).get("content", ""), usage
+                 "prompt_s": (d.get("prompt_eval_duration") or 0) / 1e9,
+                 "done_reason": d.get("done_reason"), "thinking_chars": len(msg.get("thinking") or "")}
+        return msg.get("content", ""), usage
 
     def unload(self) -> None:
         """Free RAM/VRAM: an empty request with keep_alive=0 unloads the model."""

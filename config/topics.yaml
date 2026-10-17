@@ -1,4 +1,6 @@
 # Documented real-world mysteries the engine may research (Milestone 2).
+# Titles were written without access to Wikipedia from the authoring machine: verify them with
+# `uv run unseen topics` (a missing title falls back to Wikipedia search at research time).
 # Curated on purpose: historical (40+ years), well documented on Wikipedia, and not centred on the
 # suffering of identifiable recent victims. `wikipedia` is the exact English Wikipedia title.
 # sensitivity: low = phenomena/objects/folklore; medium = people died or vanished long ago
@@ -9,7 +11,7 @@ topics:
   - {id: flannan_isles, wikipedia: "Flannan Isles Lighthouse", year: 1900, kind: disappearance, sensitivity: medium}
   - {id: carroll_deering, wikipedia: "Carroll A. Deering", year: 1921, kind: ghost ship, sensitivity: medium}
   - {id: ss_baychimo, wikipedia: "SS Baychimo", year: 1931, kind: ghost ship, sensitivity: low}
-  - {id: max_headroom, wikipedia: "Max Headroom signal hijacking", year: 1987, kind: broadcast intrusion, sensitivity: low}
+  - {id: max_headroom, wikipedia: "Max Headroom broadcast signal intrusion", year: 1987, kind: broadcast intrusion, sensitivity: low}
   - {id: uvb76, wikipedia: "UVB-76", year: 1976, kind: radio signal, sensitivity: low}
   - {id: wow_signal, wikipedia: "Wow! signal", year: 1977, kind: radio signal, sensitivity: low}
   - {id: taos_hum, wikipedia: "Taos Hum", year: 1991, kind: sound phenomenon, sensitivity: low}
@@ -25,7 +27,7 @@ topics:
   - {id: roanoke, wikipedia: "Roanoke Colony", year: 1590, kind: disappearance, sensitivity: low}
   - {id: woolpit, wikipedia: "Green children of Woolpit", year: 1150, kind: folklore, sensitivity: low}
   - {id: chase_vault, wikipedia: "Chase Vault", year: 1819, kind: folklore, sensitivity: low}
-  - {id: gef, wikipedia: "Gef (mongoose)", year: 1931, kind: folklore, sensitivity: low}
+  - {id: gef, wikipedia: "Gef", year: 1931, kind: folklore, sensitivity: low}
   - {id: solway_spaceman, wikipedia: "Solway Firth Spaceman", year: 1964, kind: photograph, sensitivity: low}
   - {id: rendlesham, wikipedia: "Rendlesham Forest incident", year: 1980, kind: sighting, sensitivity: low}
   - {id: kecksburg, wikipedia: "Kecksburg UFO incident", year: 1965, kind: sighting, sensitivity: low}
