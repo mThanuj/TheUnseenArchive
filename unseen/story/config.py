@@ -35,7 +35,7 @@ class OpenAICompatCfg(BaseModel):
 
 
 class LLMCfg(BaseModel):
-    chain: list[str] = ["ollama"]
+    chain: list[str] = ["openrouter", "ollama"]
     ollama: OllamaCfg
     gemini: GeminiCfg
     openai_compat: dict[str, OpenAICompatCfg] = {}

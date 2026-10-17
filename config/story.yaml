@@ -17,21 +17,21 @@ llm:
     # Gemma 4 can "think" before answering; left on, it spends the token budget on hidden reasoning
     # and returns empty content. Ollama's `think` accepts false or a level (low/medium/high/max).
     think: false
-    timeout_s: 2400                 # CPU generation of a full script can take several minutes
-  gemini:                           # key: https://aistudio.google.com/apikey -> GEMINI_API_KEY
+    timeout_s: 2400 # CPU generation of a full script can take several minutes
+  gemini: # key: https://aistudio.google.com/apikey -> GEMINI_API_KEY
     url: https://generativelanguage.googleapis.com/v1beta
-    model: gemini-2.5-flash         # check current names: uv run unseen llm-models --provider gemini
+    model: gemini-2.5-flash # check current names: uv run unseen llm-models --provider gemini
     timeout_s: 300
-  openai_compat:                    # OpenAI-compatible APIs; model names change, check with llm-models
-    groq:                           # key: https://console.groq.com/keys -> GROQ_API_KEY
+  openai_compat: # OpenAI-compatible APIs; model names change, check with llm-models
+    groq: # key: https://console.groq.com/keys -> GROQ_API_KEY
       url: https://api.groq.com/openai/v1
-      model: llama-3.3-70b-versatile
+      model: openai/gpt-oss-20b
       key_env: GROQ_API_KEY
-    cerebras:                       # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
+    cerebras: # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
       url: https://api.cerebras.ai/v1
       model: gpt-oss-120b
       key_env: CEREBRAS_API_KEY
-    openrouter:                     # optional, not in the chain by default; ":free" models are rate-capped
+    openrouter: # optional, not in the chain by default; ":free" models are rate-capped
       url: https://openrouter.ai/api/v1
       model: "meta-llama/llama-3.3-70b-instruct:free"
       key_env: OPENROUTER_API_KEY
@@ -39,7 +39,7 @@ llm:
     concepts: 1.0
     script: 0.8
     critique: 0.2
-  max_retries: 2                    # re-ask when the output is not valid JSON for the schema
+  max_retries: 2 # re-ask when the output is not valid JSON for the schema
 
 brand:
   name: The Unseen Archive
@@ -50,30 +50,36 @@ brand:
     horror; lets details and silences do the work. Opens each entry like a catalogue record
     (entry number, device, where it was recovered) and closes with a single line that lingers.
 
-categories:                         # weights for daily rotation; never the same category 3 days running
-  fiction_horror: {weight: 0.45, label: "Fictional horror"}
-  psychological_mystery: {weight: 0.30, label: "Psychological mystery"}
-  real_mystery: {weight: 0.25, label: "Documented real-world mystery"}
+categories: # weights for daily rotation; never the same category 3 days running
+  fiction_horror: { weight: 0.45, label: "Fictional horror" }
+  psychological_mystery: { weight: 0.30, label: "Psychological mystery" }
+  real_mystery: { weight: 0.25, label: "Documented real-world mystery" }
 
-length:                             # varied on purpose; seconds of finished Reel
-  choices: [{seconds: 20, weight: 1}, {seconds: 30, weight: 3}, {seconds: 40, weight: 2}, {seconds: 50, weight: 1}]
-  words_per_second: 2.3             # slow, suspenseful narration including pauses
-  scene_seconds: {min: 2.0, max: 5.0, typical: 4.0}
+length: # varied on purpose; seconds of finished Reel
+  choices:
+    [
+      { seconds: 20, weight: 1 },
+      { seconds: 30, weight: 3 },
+      { seconds: 40, weight: 2 },
+      { seconds: 50, weight: 1 },
+    ]
+  words_per_second: 2.3 # slow, suspenseful narration including pauses
+  scene_seconds: { min: 2.0, max: 5.0, typical: 4.0 }
   max_scenes: 10
 
 # Ingredients are sampled per story (and cooled down for a few days) to force variety.
 ingredients:
   cooldown_stories: 5
   device:
-    - {id: camcorder, desc: "early-2000s handheld camcorder"}
-    - {id: cctv, desc: "fixed high-angle security camera"}
-    - {id: night_vision, desc: "handheld night-vision camera"}
-    - {id: phone, desc: "smartphone held vertically"}
-    - {id: bodycam, desc: "chest-mounted body camera"}
-    - {id: dashcam, desc: "car dashboard camera"}
-    - {id: trail_cam, desc: "motion-triggered trail camera in the woods"}
-    - {id: webcam, desc: "laptop webcam in a dark room"}
-    - {id: film_8mm, desc: "silent 8mm home-movie film"}
+    - { id: camcorder, desc: "early-2000s handheld camcorder" }
+    - { id: cctv, desc: "fixed high-angle security camera" }
+    - { id: night_vision, desc: "handheld night-vision camera" }
+    - { id: phone, desc: "smartphone held vertically" }
+    - { id: bodycam, desc: "chest-mounted body camera" }
+    - { id: dashcam, desc: "car dashboard camera" }
+    - { id: trail_cam, desc: "motion-triggered trail camera in the woods" }
+    - { id: webcam, desc: "laptop webcam in a dark room" }
+    - { id: film_8mm, desc: "silent 8mm home-movie film" }
   location:
     - abandoned hospital wing
     - flooded basement
@@ -122,7 +128,7 @@ ingredients:
     - the archive itself appears in the footage
 
 rules:
-  min_critique_score: 7             # any dimension below this triggers one revision pass
+  min_critique_score: 7 # any dimension below this triggers one revision pass
   hook_max_words: 12
   narration_line_max_words: 22
   banned_cliches:
@@ -137,22 +143,65 @@ rules:
     - blood dripping from the walls
   # Phrases flagged in video prompts (whole-word match): small video models render them as
   # artefacts or unreadable text. Degradation is added in post-production instead (M4).
-  video_prompt_banned_words: [noise, noisy, grain, grainy, film grain, vhs, glitch, glitchy, tv static,
-                              static noise, low-resolution, low resolution, pixelated, artifacts, text,
-                              subtitles, caption, watermark, logo, letters, sign that reads, gore, blood]
-  video_prompt_words: {min: 45, max: 130}
+  video_prompt_banned_words:
+    [
+      noise,
+      noisy,
+      grain,
+      grainy,
+      film grain,
+      vhs,
+      glitch,
+      glitchy,
+      tv static,
+      static noise,
+      low-resolution,
+      low resolution,
+      pixelated,
+      artifacts,
+      text,
+      subtitles,
+      caption,
+      watermark,
+      logo,
+      letters,
+      sign that reads,
+      gore,
+      blood,
+    ]
+  video_prompt_words: { min: 45, max: 130 }
   content_limits: >-
     Suspense, dread and implication over shock. No gore, no harm to children or animals shown,
     no sexual content, no real living private individuals, no real brands, no slurs, no
     self-harm. Real places may be named only for documented real-world cases.
 
 novelty:
-  max_similarity: 0.86              # cosine similarity to any past story above this = too similar
-  recent_titles_in_prompt: 12       # shown to the model as "do not repeat"
+  max_similarity: 0.86 # cosine similarity to any past story above this = too similar
+  recent_titles_in_prompt: 12 # shown to the model as "do not repeat"
 
 real_mystery:
-  min_years_ago_sensitive: 40       # cases where people died or vanished must be historical
-  max_source_chars: 9000            # how much article text the model reads (CPU speed)
-  hedge_words: [reportedly, according to, allegedly, some believe, some say, claimed, is said to,
-                legend, theory, theorists, may have, might have, possibly, perhaps, accounts,
-                rumoured, rumored, supposedly, witnesses said, never confirmed]
+  min_years_ago_sensitive: 40 # cases where people died or vanished must be historical
+  max_source_chars: 9000 # how much article text the model reads (CPU speed)
+  hedge_words:
+    [
+      reportedly,
+      according to,
+      allegedly,
+      some believe,
+      some say,
+      claimed,
+      is said to,
+      legend,
+      theory,
+      theorists,
+      may have,
+      might have,
+      possibly,
+      perhaps,
+      accounts,
+      rumoured,
+      rumored,
+      supposedly,
+      witnesses said,
+      never confirmed,
+    ]
