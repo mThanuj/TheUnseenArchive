@@ -99,8 +99,9 @@ def write_report(results: dict, path: Path) -> Path:
         "## Notes",
         "",
         "- `sampler warmup` = time from sampler start to the first step minus one step: mostly moving weights to the GPU.",
-        "- `shared GPU mem growth` > a few hundred MB means the driver spilled VRAM into system RAM (slow). "
-        "Set NVIDIA Control Panel > Manage 3D settings > Program Settings > ComfyUI's python.exe > "
+        "- `shared GPU mem growth` is usually ComfyUI keeping offloaded weights in pinned system RAM "
+        "(expected). It only counts as a spill when dedicated VRAM is also full; then set NVIDIA Control "
+        "Panel > Manage 3D settings > Program Settings > ComfyUI's python.exe > "
         "CUDA - Sysmem Fallback Policy = Prefer No Sysmem Fallback.",
         "- Clips (`*.mp4`) and frames are git-ignored; review them locally in each case folder.",
     ]

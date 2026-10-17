@@ -57,6 +57,18 @@ def test_gate_pass_and_failure_reasons():
     spill = evaluate_gate(_ok_result(resources={"shared_gpu": {"available": True, "delta_mb": 2000}}), GATE)
     assert not spill["passed"] and not spill["within_time"]
 
+    # Real-world case from the RTX 3050: ~1 GB "shared" growth from ComfyUI's pinned offload
+    # buffers while dedicated VRAM peaked well below full -> not a spill.
+    pinned = evaluate_gate(_ok_result(resources={
+        "shared_gpu": {"available": True, "delta_mb": 1065},
+        "vram": {"available": True, "peak_mb": 3247, "total_mb": 4096}}), GATE)
+    assert pinned["passed"] and any("pinned" in n for n in pinned["notes"])
+
+    full = evaluate_gate(_ok_result(resources={
+        "shared_gpu": {"available": True, "delta_mb": 1065},
+        "vram": {"available": True, "peak_mb": 4000, "total_mb": 4096}}), GATE)
+    assert not full["passed"] and not full["within_time"]
+
     static = evaluate_gate(_ok_result(motion={"local_motion_p98": 0.01, "duplicate_frame_ratio": 0.9}), GATE)
     assert not static["passed"] and static["within_time"] and not static["motion_ok"]
 

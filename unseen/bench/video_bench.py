@@ -102,11 +102,26 @@ def timing_breakdown(events: list[tuple[float, str, dict]], workflow: dict,
     return out
 
 
+VRAM_FULL_FRACTION = 0.95
+
+
 def spilled(result: dict, gate: Gate) -> bool | None:
-    shared = (result.get("resources") or {}).get("shared_gpu") or {}
+    """True only for a real driver sysmem-fallback spill.
+
+    ComfyUI's dynamic-VRAM offloading keeps weights in pinned host memory, which Windows also
+    reports as "shared GPU memory", so shared-memory growth alone is not a spill. The driver only
+    falls back to system RAM once dedicated VRAM is full, so require both signals.
+    """
+    res = result.get("resources") or {}
+    shared = res.get("shared_gpu") or {}
     if not shared.get("available"):
         return None
-    return shared.get("delta_mb", 0) > gate.spill_threshold_mb
+    if shared.get("delta_mb", 0) <= gate.spill_threshold_mb:
+        return False
+    vram = res.get("vram") or {}
+    if vram.get("available") and vram.get("total_mb"):
+        return vram.get("peak_mb", 0) >= VRAM_FULL_FRACTION * vram["total_mb"]
+    return True  # can't see dedicated VRAM: stay conservative
 
 
 def evaluate_gate(result: dict, gate: Gate) -> dict:
@@ -119,10 +134,13 @@ def evaluate_gate(result: dict, gate: Gate) -> dict:
     if ok and not within_time:
         reasons.append(f"took {result['wall_s'] / 60:.1f} min > {gate.max_minutes_per_clip} min")
     sp = spilled(result, gate)
+    shared_delta = ((result.get("resources") or {}).get("shared_gpu") or {}).get("delta_mb", 0)
     if sp:
-        reasons.append("VRAM spilled into shared system memory")
+        reasons.append("VRAM full and spilling into shared system memory")
     elif sp is None:
         notes.append("shared-memory spill not measured")
+    elif shared_delta > gate.spill_threshold_mb:
+        notes.append(f"{shared_delta} MB pinned host memory (normal for ComfyUI offloading, not a spill)")
     out = result.get("output") or {}
     if ok and out.get("duration_s", 0) < gate.min_clip_seconds:
         reasons.append(f"clip {out.get('duration_s')}s < {gate.min_clip_seconds}s")

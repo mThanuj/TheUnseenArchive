@@ -50,12 +50,13 @@ prompts:
   - id: cctv_figure
     seed: 1002
     text: >-
-      A fixed high-angle security camera looks down on an empty underground parking garage at
-      night; the camera does not move. A long fluorescent ceiling light flickers on and off above
-      rows of concrete pillars and two parked cars. A thin person in dark clothing slowly walks out
-      from behind a pillar in the middle distance, stops in the center of the frame, and slowly
-      turns their head to look up at the camera. Black and white image, wide-angle view, harsh
-      overhead light and deep shadows. Realistic surveillance camera footage.
+      A thin person in dark clothing walks steadily toward a fixed security camera through an
+      empty underground parking garage at night, passing between rows of concrete pillars. The
+      camera is mounted high on the wall and does not move; it looks down at a wide angle. As the
+      person walks, a long fluorescent ceiling light above them flickers on and off. The person
+      keeps walking until they are close to the camera, then stops and slowly tilts their head up
+      to look directly into the lens. Black and white image, harsh overhead light, deep shadows
+      between the pillars. Realistic surveillance camera footage.
   - id: nightvision_forest
     seed: 1003
     text: >-
@@ -100,6 +101,25 @@ models:
     steps: 8
     cfg: 1.0
     sampler: euler_ancestral      # Lightricks' 13B distilled ComfyUI workflow: same sigmas, euler_ancestral
+    negative_prompt: *ltx_negative
+    constraints: {dim_multiple: 32, frame_step: 8}
+    variants:
+      - {name: official, sigmas: *ltx_distilled_sigmas}
+    quick: {width: 512, height: 768, frames: 49}
+    ladder:
+      - {width: 512, height: 768, frames: 49}
+      - {width: 512, height: 768, frames: 97}
+      - {width: 704, height: 1216, frames: 97}
+    floor:
+      - {width: 384, height: 640, frames: 49}
+  ltxv13b_q4:
+    label: LTX-Video 13B 0.9.8 distilled (GGUF Q4_K_M) - RAM-heavy experiment
+    workflow: ltxv_t2v
+    files: {diffusion: ltxv_13b_098_distilled_q4km, text_encoder: t5xxl_q4km, vae: ltxv_13b_098_vae}
+    fps: 24
+    steps: 8
+    cfg: 1.0
+    sampler: euler_ancestral
     negative_prompt: *ltx_negative
     constraints: {dim_multiple: 32, frame_step: 8}
     variants:

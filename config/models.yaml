@@ -33,6 +33,13 @@ files:
     size: 6506980352
     sha256: 1301695484240e3423df052825eabb836302e43b68fc04111cc25076f5c64b24
     license: ltxv-open-weights-0x
+  ltxv_13b_098_distilled_q4km:
+    repo: QuantStack/LTXV-13B-0.9.8-distilled-GGUF
+    path: LTXV-13B-0.9.8-distilled-Q4_K_M.gguf
+    dest: diffusion_models
+    size: 8818041856
+    sha256: 032c3f28735a11a3f706ed3a01b8d1af48ff4277e151a79fdc07961250c46dd5
+    license: ltxv-open-weights-0x
   ltxv_13b_098_vae:
     repo: QuantStack/LTXV-13B-0.9.8-distilled-GGUF
     path: vae/LTXV-13B-0.9.8-distilled-VAE.safetensors
@@ -124,4 +131,5 @@ sets:
   wan21: [wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]                       # ~7.2 GB
   wan22: [wan22_ti2v_5b_turbo_q3km, umt5xxl_q5km, wan22_vae]                 # ~8.1 GB (shares UMT5 with wan21)
   ltxv13b: [ltxv_13b_098_distilled_q3km, t5xxl_q5km, ltxv_13b_098_vae]       # ~12.4 GB (shares T5 with ltxv)
+  ltxv13b_q4: [ltxv_13b_098_distilled_q4km, t5xxl_q4km, ltxv_13b_098_vae]    # ~14.2 GB; RAM-heavy experiment
   bench: [ltxv_2b_096_distilled_q8, t5xxl_q5km, ltxv_096_vae, wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]
