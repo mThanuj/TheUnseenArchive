@@ -68,6 +68,47 @@ def inline_refs(schema: dict) -> dict:
     return resolve(schema)
 
 
+def schema_guide(schema: dict) -> str:
+    """Compact field guide (path, type, limits, description) from an inlined schema.
+
+    Grammar-constrained decoding (Ollama `format`) enforces the JSON *shape* only; the model still
+    needs the field descriptions and limits in the prompt. This is much shorter than the raw schema.
+    """
+    lines: list[str] = []
+
+    def walk(node: dict, path: str) -> None:
+        kind = node.get("type")
+        if kind == "object" or "properties" in node:
+            for name, sub in (node.get("properties") or {}).items():
+                walk(sub, f"{path}.{name}" if path else name)
+            return
+        if kind == "array":
+            limits = "/".join(f"{k}={node[k]}" for k in ("minItems", "maxItems") if k in node)
+            items = node.get("items") or {}
+            if items.get("type") == "object" or "properties" in items:
+                lines.append(f"- {path}: list of objects{' (' + limits + ')' if limits else ''}"
+                             + (f" - {node['description']}" if node.get("description") else ""))
+                walk(items, f"{path}[]")
+                return
+            node = {**items, "description": node.get("description", items.get("description")),
+                    "_limits": limits}
+            kind = f"list of {items.get('type', 'value')}"
+        extras = []
+        if "enum" in node:
+            extras.append("one of: " + ", ".join(map(str, node["enum"])))
+        for k, label in (("minimum", "min"), ("maximum", "max")):
+            if k in node:
+                extras.append(f"{label} {node[k]}")
+        if node.get("_limits"):
+            extras.append(node["_limits"])
+        desc = node.get("description", "")
+        lines.append(f"- {path} ({kind}{'; ' + '; '.join(extras) if extras else ''})"
+                     + (f": {desc}" if desc else ""))
+
+    walk(schema, "")
+    return "\n".join(lines)
+
+
 def extract_json(text: str) -> str:
     """Strip code fences / chatter around the first JSON object."""
     text = text.strip()

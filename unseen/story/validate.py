@@ -16,12 +16,13 @@ from .models import Claim, StoryDraft
 
 
 def words(text: str) -> list[str]:
-    return re.findall(r"[A-Za-z0-9']+", text)
+    return re.findall(r"[\w'’]+", text)
 
 
 def _norm(text: str) -> str:
-    """Lowercase alphanumerics only: robust to punctuation/quote/dash drift when copying quotes."""
-    text = unicodedata.normalize("NFKD", text).lower()
+    """Lowercase alphanumerics only, accents stripped: robust to punctuation/quote/dash/accent drift
+    when the model copies a quote."""
+    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)).lower()
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
 
 

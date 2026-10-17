@@ -11,7 +11,7 @@ from typing import Callable
 
 import httpx
 
-from .base import LLMError
+from .base import LLMError, schema_guide
 
 Log = Callable[[str], None]
 
@@ -45,7 +45,7 @@ class OllamaProvider:
         return any(_same_model(m.get("name", ""), self.model) for m in r.json().get("models", []))
 
     def pull(self, log: Log = print) -> None:
-        last = -10.0
+        last: dict[str, float] = {}   # per layer digest
         with httpx.stream("POST", f"{self.url}/api/pull", json={"model": self.model, "stream": True},
                           timeout=None) as r:
             if r.status_code != 200:
@@ -58,15 +58,18 @@ class OllamaProvider:
                     raise LLMError(f"ollama pull: {msg['error']}")
                 total, done = msg.get("total"), msg.get("completed")
                 if total and done:
+                    key = msg.get("digest", "")
                     pct = 100 * done / total
-                    if pct - last >= 10:
-                        log(f"  {msg.get('status', '')}: {pct:.0f}% of {total / 1e9:.1f} GB")
-                        last = pct
+                    if pct - last.get(key, -10.0) >= 10:
+                        log(f"  {msg.get('status', '')}: {pct:.0f}% of {total / 1e9:.2f} GB")
+                        last[key] = pct
                 elif msg.get("status"):
                     log(f"  {msg['status']}")
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:
+        # `format` constrains the JSON shape; the field guide tells the model what each field means.
+        user = f"{user}\n\nJSON fields to fill:\n{schema_guide(schema)}"
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],

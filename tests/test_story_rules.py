@@ -26,6 +26,22 @@ def test_schema_is_self_contained():
     assert schema["properties"]["scenes"]["items"]["properties"]["device"]["enum"]
 
 
+def test_schema_guide_lists_nested_fields_with_descriptions():
+    from unseen.llm.base import schema_guide
+    guide = schema_guide(inline_refs(StoryDraft.model_json_schema()))
+    assert "- scenes: list of objects (minItems=3/maxItems=10)" in guide
+    assert "- scenes[].video_prompt (string): final text-to-video prompt" in guide
+    assert "- scenes[].device (string; one of: camcorder" in guide
+    assert "- narration[].pause_after_s (number; min 0.0; max 3.0)" in guide
+    assert len(guide) < 6000          # compact enough for CPU prompt processing
+
+
+def test_word_count_handles_curly_apostrophes_and_accents():
+    from unseen.story.validate import words
+    assert len(words("Don’t open the café door")) == 5
+    assert quote_in_source("the cafe was closed", "In 1972 the café was closed for good.")
+
+
 def test_extract_json_handles_fences_and_chatter():
     assert extract_json('Sure!\n```json\n{"a": 1}\n```') == '{"a": 1}'
     assert extract_json('noise {"a": {"b": 2}} trailing') == '{"a": {"b": 2}}'

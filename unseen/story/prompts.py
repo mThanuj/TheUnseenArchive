@@ -99,11 +99,11 @@ def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
             f"concrete, actionable fixes with line/scene ids: weak hook, predictable turn, filler, confusing "
             f"continuity, shots a video model will render badly (text, hands, crowds, close-up faces, too "
             f"much happening), an ending that does not land. verdict = 'revise' if any score is below 7.\n\n"
-            f"{draft.model_dump_json(indent=2)}")
+            f"{draft.model_dump_json()}")
 
 
 def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique) -> str:
-    return (f"{base_prompt}\n\nA previous draft:\n{draft.model_dump_json(indent=2)}\n\nThe editor's critique "
+    return (f"{base_prompt}\n\nA previous draft:\n{draft.model_dump_json()}\n\nThe editor's critique "
             f"(scores {critique.scores()}):\n- " + "\n- ".join(critique.issues)
             + "\n\nWrite the improved, complete script. Keep what works; fix every issue.")
 

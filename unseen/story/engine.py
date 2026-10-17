@@ -155,6 +155,16 @@ class StoryEngine:
     # --------------------------------------------------------------- pipeline
     def new_story(self, category: str | None = None, topic_id: str | None = None,
                   target_seconds: int | None = None) -> tuple[StoryRecord, Path]:
+        """Write one story. The LLM is unloaded afterwards even on failure (frees RAM/VRAM)."""
+        try:
+            return self._new_story(category, topic_id, target_seconds)
+        finally:
+            unload = getattr(self.provider, "unload", None)
+            if unload:
+                unload()
+
+    def _new_story(self, category: str | None, topic_id: str | None,
+                   target_seconds: int | None) -> tuple[StoryRecord, Path]:
         t0 = time.monotonic()
         self.stats = []
         category = category or ("real_mystery" if topic_id else self.pick_category())
@@ -222,9 +232,6 @@ class StoryEngine:
             status="draft" if not problems else "draft_with_problems", dir=str(out),
             provider=self.provider.name, model=self.provider.model,
             critique_avg=round(sum(scores.values()) / len(scores), 2) if scores else None, embedding=vec)
-        unload = getattr(self.provider, "unload", None)
-        if unload:
-            unload()
         self.log(f"Story saved to {out} in {(time.monotonic() - t0) / 60:.1f} min"
                  + (f" ({len(problems)} unresolved check(s))" if problems else ""))
         return record, out

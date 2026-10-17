@@ -6,7 +6,7 @@ llm:
     url: http://127.0.0.1:11434
     # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
     model: hf.co/google/gemma-4-12B-it-qat-q4_0-gguf
-    num_ctx: 8192
+    num_ctx: 16384                  # revise step carries the draft + critique + field guide
     timeout_s: 2400                 # CPU generation of a full script can take several minutes
   gemini:
     url: https://generativelanguage.googleapis.com/v1beta
