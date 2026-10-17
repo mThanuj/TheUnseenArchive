@@ -144,6 +144,7 @@ class BenchModel(BaseModel):
     sampler: str
     scheduler: str = "simple"
     shift: float | None = None
+    negative_prompt: str | None = None      # overrides BenchConfig.negative_prompt
     constraints: Constraints
     variants: list[dict[str, Any]]
     quick: Preset

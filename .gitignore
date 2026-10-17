@@ -9,10 +9,14 @@ __pycache__/
 runtime/
 models/
 
-# Benchmark artifacts: keep report.md, results.json and contact sheets; ignore bulky outputs
-bench_results/**/frames/
-bench_results/**/*.mp4
-bench_results/**/*.log
+# Generated output: never committed (paste report.md into the conversation instead)
+bench_results/
+runs/
+output/
+state/
+logs/
+cache/
+*.log
 
 # Secrets
 .env

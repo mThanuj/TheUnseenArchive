@@ -220,9 +220,11 @@ class VideoBench:
     def _job(self, case: Case) -> workflows.ClipJob:
         m = self.model
         return workflows.ClipJob(
-            prompt=case.prompt.text, negative=self.cfg.negative_prompt, seed=case.prompt.seed,
+            prompt=case.prompt.text, negative=m.negative_prompt or self.cfg.negative_prompt,
+            seed=case.prompt.seed,
             width=case.preset.width, height=case.preset.height, frames=case.preset.frames,
-            fps=m.fps, steps=m.steps, cfg=m.cfg, sampler=m.sampler, scheduler=m.scheduler,
+            fps=m.fps, steps=m.steps, cfg=m.cfg, sampler=case.variant.get("sampler", m.sampler),
+            scheduler=m.scheduler,
             shift=m.shift, sigmas=case.variant.get("sigmas"),
             filename_prefix=f"bench/{self.run_tag}/{case.case_id}/frame",
             tiling=self.cfg.vae_tiling.model_dump(),
@@ -420,16 +422,21 @@ class VideoBench:
                      "visual quality and believable motion is a human one."),
         }
 
-    def run(self, phases: list[str], quick: bool = False, modes: list[str] | None = None) -> Path:
+    def run(self, phases: list[str], quick: bool = False, modes: list[str] | None = None,
+            preset: Preset | None = None) -> Path:
+        """`preset` overrides the quick preset (with quick=True) or the quality-phase preset."""
         self.preflight()
+        if preset is not None and (problems := check_constraints(self.model, preset)):
+            raise RuntimeError("invalid --preset: " + "; ".join(problems))
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.results["env"] = collect_env(self.rt)
         self.log(f"Benchmark {self.model.label} -> {self.out_dir}")
         modes = modes or self.cfg.memory_modes
         try:
             if quick:
-                self.log(f"Quick run: one clip, {self.model.quick.label}, memory mode {modes[0]}")
-                self._session(modes[0], [self._case("quick", "quick", modes[0], self.model.quick)])
+                p = preset or self.model.quick
+                self.log(f"Quick run: one clip, {p.label}, memory mode {modes[0]}")
+                self._session(modes[0], [self._case("quick", "quick", modes[0], p)])
                 return self.out_dir
             probe_best = None
             mode = modes[0]
@@ -442,14 +449,16 @@ class VideoBench:
                     mode = probe_best["memory_mode"]
                 # a quick clip that works but blows the time gate means: go smaller, not bigger
                 quick_failed = probe_best is None or not probe_best["gate"]["within_time"]
-            preset = None if quick_failed else self.model.quick
+            chosen = None if quick_failed else self.model.quick
             if "ladder" in phases:
-                preset = self.phase_ladder(mode, probe_best, quick_failed)
+                chosen = self.phase_ladder(mode, probe_best, quick_failed)
+            if preset is not None:
+                chosen = preset
             if "quality" in phases:
-                if preset is None:
+                if chosen is None:
                     self.log("No preset finished within the time gate; skipping the quality phase.")
                 else:
-                    self.phase_quality(mode, preset)
+                    self.phase_quality(mode, chosen)
             return self.out_dir
         finally:
             self._verdict()

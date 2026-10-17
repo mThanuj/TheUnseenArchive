@@ -17,7 +17,29 @@ licenses:
       "without expressly and intelligibly disclaiming that the information and/or content is
       machine generated" -- every published Reel must carry an AI-generated disclosure.
 
+  ltxv-open-weights-0x:
+    name: LTXV Open Weights License 0.X (LTX-Video 13B 0.9.8)
+    url: https://huggingface.co/QuantStack/LTXV-13B-0.9.8-distilled-GGUF/blob/main/LICENSE.md
+    commercial_use: "yes for entities with annual revenue < $10,000,000; above that a paid license is required"
+    obligations: >-
+      Same Attachment A as above, including (e): published content must expressly disclose that
+      it is machine generated.
+
 files:
+  ltxv_13b_098_distilled_q3km:
+    repo: QuantStack/LTXV-13B-0.9.8-distilled-GGUF
+    path: LTXV-13B-0.9.8-distilled-Q3_K_M.gguf
+    dest: diffusion_models
+    size: 6506980352
+    sha256: 1301695484240e3423df052825eabb836302e43b68fc04111cc25076f5c64b24
+    license: ltxv-open-weights-0x
+  ltxv_13b_098_vae:
+    repo: QuantStack/LTXV-13B-0.9.8-distilled-GGUF
+    path: vae/LTXV-13B-0.9.8-distilled-VAE.safetensors
+    dest: vae
+    size: 2493859452
+    sha256: 5bbe6f857ede5e9b262e4a294c26a1df5dc33a817f229a777cbf3adfab5ba61e
+    license: ltxv-open-weights-0x
   ltxv_2b_096_distilled_q8:
     repo: city96/LTX-Video-0.9.6-distilled-gguf
     path: ltxv-2b-0.9.6-distilled-04-25-Q8_0.gguf
@@ -101,4 +123,5 @@ sets:
   ltxv_lite: [ltxv_2b_096_distilled_q4km, t5xxl_q4km, ltxv_096_vae]          # ~6.7 GB, if RAM is tight
   wan21: [wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]                       # ~7.2 GB
   wan22: [wan22_ti2v_5b_turbo_q3km, umt5xxl_q5km, wan22_vae]                 # ~8.1 GB (shares UMT5 with wan21)
+  ltxv13b: [ltxv_13b_098_distilled_q3km, t5xxl_q5km, ltxv_13b_098_vae]       # ~12.4 GB (shares T5 with ltxv)
   bench: [ltxv_2b_096_distilled_q8, t5xxl_q5km, ltxv_096_vae, wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]

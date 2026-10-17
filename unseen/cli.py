@@ -39,16 +39,74 @@ def cmd_fetch_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_preset(text: str | None):
+    """'704x1216x97' -> Preset(width=704, height=1216, frames=97)."""
+    if not text:
+        return None
+    from .config import Preset
+    try:
+        w, h, f = (int(x) for x in text.lower().rstrip("f").split("x"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--preset must look like 704x1216x97, got {text!r}") from None
+    return Preset(width=w, height=h, frames=f)
+
+
 def cmd_bench_video(args: argparse.Namespace) -> int:
+    from .bench.compare import write_compare
     from .bench.video_bench import VideoBench
     phases = [p.strip() for p in args.phases.split(",") if p.strip()]
     bench = VideoBench(args.model)
     if args.timeout_min:
         bench.cfg.case_timeout_minutes = args.timeout_min
-    out = bench.run(phases=phases, quick=args.quick, modes=args.mode)
+    out = bench.run(phases=phases, quick=args.quick, modes=args.mode, preset=args.preset)
     verdict = bench.results.get("verdict", {})
+    compare = write_compare(bench.rt.path("bench_dir"))
     print(f"\nDone. {verdict.get('cases_passed', 0)}/{verdict.get('cases_run', 0)} cases passed the "
-          f"automatic gate. Report: {out / 'report.md'}")
+          f"automatic gate.\nReport: {out / 'report.md'}\nSide-by-side clips: {compare}")
+    return 0
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    from .bench.compare import write_compare
+    models = [m.strip() for m in args.models.split(",")] if args.models else None
+    out = write_compare(load_runtime().path("bench_dir"), models=models, latest_only=not args.all_runs)
+    print(f"Wrote {out} - open it in a browser")
+    return 0
+
+
+def cmd_shootout(args: argparse.Namespace) -> int:
+    """Render every test prompt with each installed model at its quick preset, then compare."""
+    from .bench.compare import write_compare
+    from .bench.video_bench import VideoBench
+    from .models import is_verified
+    rt, manifest, cfg = load_runtime(), load_models(), load_bench()
+    wanted = [m.strip() for m in args.models.split(",")] if args.models else list(cfg.models)
+    ready, skipped = [], []
+    for key in wanted:
+        if key not in cfg.models:
+            raise KeyError(f"unknown model {key!r}; choose from {sorted(cfg.models)}")
+        files = cfg.models[key].files.values()
+        ok = all(is_verified(manifest.local_path(rt, f), manifest.files[f].sha256, manifest.files[f].size)
+                 for f in files)
+        (ready if ok else skipped).append(key)
+    if skipped:
+        print(f"Skipping (models not downloaded): {', '.join(skipped)}")
+    if not ready:
+        print("Nothing to run. Download a set first, e.g. uv run unseen fetch-models --set ltxv")
+        return 1
+    summary = []
+    for key in ready:
+        print(f"\n===== {key} =====")
+        bench = VideoBench(key)
+        try:
+            bench.run(phases=["quality"], preset=args.preset)
+            v = bench.results.get("verdict", {})
+            summary.append(f"{key}: {v.get('cases_passed', 0)}/{v.get('cases_run', 0)} passed -> {bench.out_dir}")
+        except Exception as exc:  # keep going with the other models
+            summary.append(f"{key}: FAILED ({exc})")
+    out = write_compare(rt.path("bench_dir"), models=ready)
+    print("\nShootout summary:\n  " + "\n  ".join(summary))
+    print(f"\nOpen {out} in a browser to compare the clips side by side.")
     return 0
 
 
@@ -105,7 +163,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", action="append",
                    help="memory mode(s) to use instead of config (repeatable)")
     p.add_argument("--timeout-min", type=float, help="per-clip timeout override in minutes")
+    p.add_argument("--preset", type=parse_preset,
+                   help="WIDTHxHEIGHTxFRAMES for --quick or the quality phase, e.g. 704x1216x97")
     p.set_defaults(func=cmd_bench_video)
+
+    p = sub.add_parser("compare", help="write bench_results/compare.html with all clips side by side")
+    p.add_argument("--models", help="comma-separated model keys (default: all)")
+    p.add_argument("--all-runs", action="store_true", help="include every run, not just the latest per model")
+    p.set_defaults(func=cmd_compare)
+
+    p = sub.add_parser("shootout", help="all test prompts x every downloaded model, then compare.html")
+    p.add_argument("--models", help="comma-separated model keys (default: every model with files present)")
+    p.add_argument("--preset", type=parse_preset, help="same WxHxF for all models (default: each model's quick preset)")
+    p.set_defaults(func=cmd_shootout)
 
     p = sub.add_parser("export-workflow", help="write a model's API-format workflow JSON")
     p.add_argument("--model", required=True, choices=models)

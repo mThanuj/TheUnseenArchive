@@ -43,8 +43,9 @@ def test_bench_memory_modes_exist_in_runtime(bench_cfg, runtime_cfg):
 
 
 def test_negative_prompt_survives_utf8_loading(bench_cfg):
-    # The Wan negative prompt contains Chinese; Windows' default cp1252 would mangle it.
-    assert "静态" in bench_cfg.negative_prompt
+    # The official Wan negative prompt is Chinese; Windows' default cp1252 would mangle it.
+    assert "静态" in bench_cfg.models["wan21"].negative_prompt
+    assert bench_cfg.negative_prompt  # generic fallback for other models
 
 
 def test_dotenv_loader(tmp_path, monkeypatch):

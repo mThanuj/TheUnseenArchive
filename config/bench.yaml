@@ -23,35 +23,47 @@ fallback_memory_modes: [classic_novram]   # tried only if every mode above fails
 negative_prompt: >-
   polished cinematic lighting, studio lighting, oversaturated, vivid colors, cartoon, anime,
   illustration, painting, 3d render, CGI, text, watermark, logo, subtitles, static image, still
-  frame, frozen, slideshow, deformed hands, extra limbs, distorted face, monster, gore,
-  色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，最差质量，低质量，丑陋的，残缺的，多余的手指，
-  画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿
+  frame, frozen, slideshow, noise, grain, blurry, deformed hands, extra limbs, distorted face
+
+# Official Wan negative prompt (identical in ComfyUI's Wan 2.1 and 2.2 templates), plus English extras.
+# Only used by models with cfg > 1 (cfg 1 ignores the negative prompt entirely).
+wan_negative_prompt: &wan_negative >-
+  色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，
+  多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，
+  cartoon, anime, CGI, 3d render, text, watermark, subtitles, noise, grain
 
 prompts:
+  # Written in LTX-Video's documented style: main action first, then movement details, appearance,
+  # environment, camera, lighting/colour, and changes, in chronological, literal language.
+  # Deliberately NO "noise/grain/low-res/VHS" words: small models render those as ugly artefacts.
+  # Believable degradation (grain, compression, timestamps, tracking errors) is added in post (M4).
   - id: flashlight_corridor
     seed: 1001
     text: >-
-      Found footage recorded on an old handheld camcorder at night inside an abandoned hospital
-      corridor. A weak flashlight beam sweeps slowly across peeling green paint, an overturned
-      wheelchair and broken glass on the floor. The camera walks forward with unsteady handheld
-      shake, hesitates, then at the far end of the corridor a heavy door slowly swings open by
-      itself into darkness. Underexposed, deep shadows, muted desaturated colors, sensor noise,
-      low-resolution home video, realistic, amateur recording.
+      A handheld camera slowly moves forward down a dark, abandoned hospital corridor at night,
+      lit only by a single flashlight beam. The beam sweeps from left to right across peeling pale
+      green walls, an overturned wheelchair and shards of broken glass on the tiled floor. The
+      camera sways slightly with each step, as if carried by a nervous person walking. At the far
+      end of the corridor a heavy wooden door slowly swings open on its own, revealing complete
+      darkness behind it. The camera stops and holds on the open doorway. Deep black shadows
+      outside the flashlight beam, muted desaturated colors. Realistic amateur point-of-view footage.
   - id: cctv_figure
     seed: 1002
     text: >-
-      Static high-angle CCTV security camera footage of a dim, empty underground parking garage
-      at night. A fluorescent tube flickers on and off. A pale person in dark clothes walks slowly
-      out from behind a concrete pillar, stops in the middle of the frame and slowly turns their
-      head toward the camera. Grainy black and white surveillance video, wide-angle lens
-      distortion, low light, realistic.
+      A fixed high-angle security camera looks down on an empty underground parking garage at
+      night; the camera does not move. A long fluorescent ceiling light flickers on and off above
+      rows of concrete pillars and two parked cars. A thin person in dark clothing slowly walks out
+      from behind a pillar in the middle distance, stops in the center of the frame, and slowly
+      turns their head to look up at the camera. Black and white image, wide-angle view, harsh
+      overhead light and deep shadows. Realistic surveillance camera footage.
   - id: nightvision_forest
     seed: 1003
     text: >-
-      Night-vision infrared footage, handheld, walking through a dense pine forest at night.
-      Green monochrome image. Between distant tree trunks two small bright reflective eyes
-      appear, blink, and move behind a tree. The camera turns quickly to follow them and briefly
-      loses focus. Heavy noise, very low light, realistic amateur recording.
+      Night-vision footage from a handheld camera walking slowly through a dense pine forest at
+      night. The whole image is monochrome green with bright white highlights. Between distant tree
+      trunks two small glowing eyes appear, blink, and move sideways behind a tree. The camera turns
+      quickly to follow them and the trees streak past with motion blur. Thin branches pass close
+      to the lens. Realistic infrared night-vision recording.
 
 models:
   ltxv:
@@ -61,17 +73,42 @@ models:
     fps: 24
     steps: 8                      # official distilled config: 8 steps, guidance 1
     cfg: 1.0
-    sampler: euler
+    sampler: euler_ancestral
+    negative_prompt: &ltx_negative >-
+      low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts,
+      fused fingers, bad anatomy, weird hand, ugly
     constraints: {dim_multiple: 32, frame_step: 8}     # frames = 8n+1
     variants:
-      - {name: ltxv_scheduler}    # core LTXVScheduler sigmas
-      # Hand-tuned distilled schedule used in Lightricks' ComfyUI workflows (UNVERIFIED for 0.9.6).
-      - {name: distilled_sigmas, sigmas: "1.0, 0.9937, 0.9875, 0.9812, 0.975, 0.9094, 0.725, 0.4219, 0.0"}
+      # The distilled model was trained on this fixed schedule; Lightricks' ComfyUI workflow for
+      # 0.9.6 distilled uses exactly these sigmas with euler_ancestral (stochastic sampling).
+      - {name: official, sigmas: &ltx_distilled_sigmas "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0"}
+      - {name: official_euler, sigmas: *ltx_distilled_sigmas, sampler: euler}
+    quick: {width: 512, height: 768, frames: 49}
+    ladder:                       # LTX "works best under 720x1280"
+      - {width: 512, height: 768, frames: 49}
+      - {width: 512, height: 768, frames: 97}
+      - {width: 640, height: 1088, frames: 97}
+      - {width: 704, height: 1216, frames: 97}
+      - {width: 704, height: 1216, frames: 121}
+    floor:
+      - {width: 384, height: 640, frames: 49}
+  ltxv13b:
+    label: LTX-Video 13B 0.9.8 distilled (GGUF Q3_K_M) - experimental on 16 GB RAM
+    workflow: ltxv_t2v
+    files: {diffusion: ltxv_13b_098_distilled_q3km, text_encoder: t5xxl_q5km, vae: ltxv_13b_098_vae}
+    fps: 24
+    steps: 8
+    cfg: 1.0
+    sampler: euler_ancestral      # Lightricks' 13B distilled ComfyUI workflow: same sigmas, euler_ancestral
+    negative_prompt: *ltx_negative
+    constraints: {dim_multiple: 32, frame_step: 8}
+    variants:
+      - {name: official, sigmas: *ltx_distilled_sigmas}
     quick: {width: 512, height: 768, frames: 49}
     ladder:
       - {width: 512, height: 768, frames: 49}
       - {width: 512, height: 768, frames: 97}
-      - {width: 576, height: 1024, frames: 97}
+      - {width: 704, height: 1216, frames: 97}
     floor:
       - {width: 384, height: 640, frames: 49}
   wan21:
@@ -79,15 +116,16 @@ models:
     workflow: wan21_t2v
     files: {diffusion: wan21_t2v_13b_fp16, text_encoder: umt5xxl_q5km, vae: wan21_vae}
     fps: 16
-    steps: 25
+    steps: 30                     # official ComfyUI template: 30 steps, cfg 6, uni_pc/simple, shift 8
     cfg: 6.0
     sampler: uni_pc
     scheduler: simple
     shift: 8.0
+    negative_prompt: *wan_negative
     constraints: {dim_multiple: 16, frame_step: 4}     # frames = 4n+1
     variants:
       - {name: default}
-    quick: {width: 480, height: 832, frames: 33}
+    quick: {width: 480, height: 832, frames: 33}       # official 1.3B size (portrait)
     ladder:
       - {width: 480, height: 832, frames: 33}
       - {width: 480, height: 832, frames: 49}
@@ -95,11 +133,11 @@ models:
     floor:
       - {width: 368, height: 640, frames: 33}
   wan22:
-    label: Wan 2.2 TI2V 5B Turbo (GGUF Q3_K_M) - only if ltxv/wan21 pass but look poor
+    label: Wan 2.2 TI2V 5B Turbo (GGUF Q3_K_M)
     workflow: wan22_ti2v
     files: {diffusion: wan22_ti2v_5b_turbo_q3km, text_encoder: umt5xxl_q5km, vae: wan22_vae}
     fps: 24
-    steps: 4
+    steps: 4                      # Turbo model card: 4 steps, CFG 1, euler/uni_pc, simple
     cfg: 1.0
     sampler: euler
     scheduler: simple
@@ -107,12 +145,14 @@ models:
     constraints: {dim_multiple: 32, frame_step: 4}
     variants:
       - {name: default}
-    quick: {width: 448, height: 800, frames: 49}
-    ladder:
-      - {width: 448, height: 800, frames: 49}
-      - {width: 448, height: 800, frames: 73}
+    quick: {width: 576, height: 1024, frames: 49}
+    ladder:                       # 704x1280 is the model's native portrait size
       - {width: 576, height: 1024, frames: 49}
+      - {width: 704, height: 1280, frames: 49}
+      - {width: 704, height: 1280, frames: 73}
+      - {width: 704, height: 1280, frames: 121}
     floor:
+      - {width: 448, height: 800, frames: 49}
       - {width: 352, height: 640, frames: 49}
 
 vae_tiling:                       # VAE decode is the usual OOM point on 4 GB; always decode tiled

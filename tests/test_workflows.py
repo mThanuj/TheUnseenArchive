@@ -19,11 +19,13 @@ def _job(model, variant, preset, prompt="a corridor", seed=1):
         sigmas=variant.get("sigmas"), filename_prefix="bench/test/frame")
 
 
-@pytest.mark.parametrize("model_key", ["ltxv", "wan21", "wan22"])
+@pytest.mark.parametrize("model_key", ["ltxv", "ltxv13b", "wan21", "wan22"])
 def test_every_variant_validates_against_schema(model_key, manifest, bench_cfg, object_info):
     model = bench_cfg.models[model_key]
     for variant in model.variants:
-        wf = workflows.build(model.workflow, _job(model, variant, model.quick), _files(manifest, model))
+        job = _job(model, variant, model.quick)
+        job.sampler = variant.get("sampler", model.sampler)
+        wf = workflows.build(model.workflow, job, _files(manifest, model))
         errors, warnings = validate_workflow(wf, object_info)
         assert errors == [], errors
         assert warnings == [], warnings
@@ -33,15 +35,27 @@ def test_every_variant_validates_against_schema(model_key, manifest, bench_cfg, 
                     assert value[0] in wf
 
 
-def test_ltxv_variants_switch_sigma_source(manifest, bench_cfg):
+def test_ltxv_uses_official_distilled_schedule(manifest, bench_cfg):
+    official = "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0"
+    for key in ("ltxv", "ltxv13b"):
+        model = bench_cfg.models[key]
+        samplers = set()
+        for variant in model.variants:
+            job = _job(model, variant, model.quick)
+            job.sampler = variant.get("sampler", model.sampler)
+            wf = workflows.build(model.workflow, job, _files(manifest, model))
+            assert wf["sigmas"]["class_type"] == "ManualSigmas"
+            assert wf["sigmas"]["inputs"]["sigmas"] == official
+            assert wf["sample"]["inputs"]["cfg"] == 1.0
+            assert wf["cond"]["inputs"]["frame_rate"] == model.fps
+            samplers.add(wf["sampler_select"]["inputs"]["sampler_name"])
+        assert "euler_ancestral" in samplers
+
+
+def test_scheduler_fallback_when_no_sigmas(manifest, bench_cfg):
     model = bench_cfg.models["ltxv"]
-    kinds = set()
-    for variant in model.variants:
-        wf = workflows.build(model.workflow, _job(model, variant, model.quick), _files(manifest, model))
-        kinds.add(wf["sigmas"]["class_type"])
-        assert wf["sample"]["inputs"]["cfg"] == 1.0
-        assert wf["cond"]["inputs"]["frame_rate"] == model.fps
-    assert kinds == {"LTXVScheduler", "ManualSigmas"}
+    wf = workflows.build(model.workflow, _job(model, {"name": "x"}, model.quick), _files(manifest, model))
+    assert wf["sigmas"]["class_type"] == "LTXVScheduler"
 
 
 def test_loader_choice_follows_file_type(manifest, bench_cfg):

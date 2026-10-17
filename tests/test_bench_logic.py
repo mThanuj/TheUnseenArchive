@@ -84,6 +84,24 @@ def test_classify_status_detects_oom():
     assert classify_status(interrupted)[0] == "timeout"
 
 
+def test_compare_page_lists_finished_clips(tmp_path):
+    import json
+    from unseen.bench.compare import write_compare
+    for run, model, ok in (("20261017-1000_ltxv", "ltxv", True), ("20261017-1100_wan21", "wan21", False)):
+        d = tmp_path / run
+        d.mkdir()
+        case = {"case_id": "quality_official_cctv_figure", "prompt_id": "cctv_figure",
+                "status": "ok" if ok else "oom", "preset_label": "512x768x49f",
+                "output": {"file": "quality_official_cctv_figure.mp4"} if ok else {},
+                "gate": {"passed": ok}}
+        (d / "results.json").write_text(json.dumps({"model_key": model, "model_label": model,
+                                                    "cases": [case]}), encoding="utf-8")
+    html = write_compare(tmp_path).read_text(encoding="utf-8")
+    assert "20261017-1000_ltxv/quality_official_cctv_figure/quality_official_cctv_figure.mp4" in html
+    assert "cctv_figure" in html
+    assert html.count("<video") == 1   # the failed wan21 case has no clip
+
+
 def test_report_renders_partial_results(tmp_path):
     results = {
         "model_label": "Test model", "started_at": "now", "env": {}, "gate": GATE.model_dump(),

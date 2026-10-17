@@ -48,6 +48,25 @@ performance counters (heuristic).
 under the found-footage treatment (M4). Camcorder/CCTV footage is low-res by nature; an AI
 upscaler can be added later if needed.
 
+**M1 results so far (target machine, 2026-10-17).** First run: LTX 2B 0.9.6 distilled, 512x768x49,
+dynamic VRAM mode: 36 s wall, 1.01 s/step, peak VRAM 3368/4096 MB, ComfyUI RAM 7.4 GB, local
+motion p98 0.82 (PASS). User verdict: motion OK, but ugly grain. Causes identified and fixed:
+- Schedule: we used the generic `LTXVScheduler`; the distilled model expects the fixed sigmas
+  `1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0` with `euler_ancestral`
+  (V, Lightricks ComfyUI-LTXVideo `ltxvideo-i2v-distilled.json` and 13B distilled workflows).
+- Prompts asked for "sensor noise / low-resolution"; rewritten in LTX's documented style
+  (chronological, literal, <200 words) with no degradation words. Degradation moves to M4 post.
+- Resolution: LTX "works best under 720x1280"; ladder now goes up to 704x1216 (we have time budget).
+- VAE decode was checked and is not the cause: core ComfyUI uses the official decode timestep 0.05
+  and noise 0.025 (V, `causal_video_autoencoder.py` at v0.41.3).
+
+Round-2 candidates (shootout): LTX 2B (official schedule), **Wan 2.2 TI2V 5B Turbo** (4 steps,
+cfg 1, native 704x1280; Apache-2.0), **LTX 13B 0.9.8 distilled Q3_K_M** (6.5 GB; no 4 GB report
+exists; RAM is the risk), Wan 2.1 1.3B (official 30 steps / cfg 6 / shift 8). No found-footage,
+VHS or CCTV LoRAs exist for these small bases (V, HF search); the closest (war-footage LoRA) is
+deliberately not used. Wan 1.3B step-distill LoRAs (CausVid) have unclear/non-commercial
+licensing and are not used.
+
 **Proving "genuine motion".** `unseen/bench/metrics.py` computes optical flow between frames and
 removes the best-fit global zoom/pan/rotation; what remains ("local motion") cannot be produced by
 a Ken Burns move over a still image. Unit tests check that a synthetic Ken Burns clip scores low

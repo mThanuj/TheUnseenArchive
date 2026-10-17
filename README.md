@@ -10,7 +10,7 @@ verified on the target machine before the next one starts.
 
 | Milestone | Scope | Status |
 |---|---|---|
-| **M1** | Generate real AI video clips on the RTX 3050 (4 GB) and measure memory, time, motion, output | **Implemented, awaiting first run on Windows** |
+| **M1** | Generate real AI video clips on the RTX 3050 (4 GB) and measure memory, time, motion, output | **First clip works (36 s/clip, LTX 2B); round 2: quality tuning + model shootout** |
 | M2 | Story engine: concepts, research with sources, scene breakdown (local LLM) | Not started |
 | M3 | Narration (Kokoro TTS) and procedural soundscape | Not started |
 | M4 | Assembly, found-footage looks, subtitles, 1080x1920 encode, validation | Not started |
@@ -59,32 +59,46 @@ The quick run prints progress and writes `bench_results\<timestamp>_ltxv\`:
 `report.md`, `results.json`, and per case: `quick.mp4`, `contact_sheet.jpg`, `workflow_api.json`.
 **Watch the mp4**: it should show real movement (light sweeping, a door moving), not a still image.
 
-### 3. Full benchmark (after the quick run works)
+### 3. Compare models side by side (round 2)
 
 ```powershell
-uv run unseen bench-video --model ltxv           # probe -> ladder -> quality; roughly 30-90 min
-uv run unseen fetch-models --set wan21           # ~7 GB more
-uv run unseen bench-video --model wan21          # slower model; can take several hours
+uv run unseen shootout                               # 3 test prompts x every downloaded model, then compare.html
+uv run unseen fetch-models --set wan22               # Wan 2.2 5B Turbo, ~8 GB (best quality candidate)
+uv run unseen fetch-models --set ltxv13b             # LTX 13B distilled Q3, ~9 GB new (experimental on 16 GB RAM)
+uv run unseen fetch-models --set wan21               # Wan 2.1 1.3B, ~3 GB new
+uv run unseen shootout --models wan22,ltxv13b        # run just the new ones; compare.html shows all latest runs
+```
+
+Open `bench_results\compare.html` in a browser: every clip plays side by side, grouped by prompt
+(press Space to restart them together). Single runs: `uv run unseen bench-video --model ltxv
+--phases quality --preset 704x1216x97`.
+
+### 4. Full benchmark for the chosen model
+
+```powershell
+uv run unseen bench-video --model ltxv               # probe -> ladder -> quality
 ```
 
 `probe` tries each memory mode with a small clip and keeps the fastest clean one; `ladder` raises
 resolution/length until something fails or exceeds 20 min/clip; `quality` renders all three test
 prompts at the largest passing size. Ctrl+C is safe; the report keeps everything finished so far.
 
-### 4. What to send back
+### 5. What to send back
 
 - The console output (especially any `ERROR`), and
-- `bench_results\<run>\report.md` (paste it, or commit the run folder: mp4/frames/logs are
-  git-ignored, the report, `results.json` and contact sheets are small), and
-- your honest opinion of the clips: does the motion look real? Is it usable as found footage?
+- the `report.md` of each run (paste it; `bench_results\` is git-ignored), and
+- your honest opinion of the clips in `compare.html`: which model looks most believable, does the
+  motion look real, is it usable as found footage?
 
-`results.json` contains your GPU/CPU model and timings, nothing secret; ComfyUI's command line
-(which contains local paths) is stripped.
+**About grain:** the raw model output should be clean and coherent. The found-footage look
+(grain, compression, timestamps, tracking errors) is applied deliberately in post-production (M4),
+where it can be controlled. Ugly noise in the raw clip is a generation problem worth reporting.
 
 ### Useful commands
 
 ```powershell
 uv run unseen fetch-models --list                # sets, sizes, what is installed
+uv run unseen compare                            # rebuild bench_results\compare.html
 uv run unseen export-workflow --model ltxv       # API workflow JSON for inspection in ComfyUI
 uv run unseen comfy-serve --mode dynamic         # run the private ComfyUI at http://127.0.0.1:8188
 uv run unseen --debug bench-video --model ltxv --quick   # full traceback on errors
