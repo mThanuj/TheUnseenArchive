@@ -5,7 +5,9 @@ llm:
   # no keys everything runs on the local Ollama model. If one fails mid-story (free quota, outage),
   # the next takes over. `--provider NAME` forces a single provider. Hosted free tiers are much
   # faster than the laptop (~4 tok/s); their limits and data-use terms are the providers' own.
-  chain: [gemini, groq, cerebras, ollama]
+  # When two or more hosted providers are available, the critique uses a different model than the
+  # writer (models grade their own work too kindly).
+  chain: [openrouter, gemini, groq, cerebras, ollama]
   ollama:
     url: http://127.0.0.1:11434
     # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
@@ -22,18 +24,22 @@ llm:
     url: https://generativelanguage.googleapis.com/v1beta
     model: gemini-2.5-flash # check current names: uv run unseen llm-models --provider gemini
     timeout_s: 300
+    # Gemini 2.5 "thinks" before answering and those tokens count against the output limit;
+    # unbounded thinking truncated long real-mystery scripts. 0 disables thinking.
+    thinking_budget: 1024
+    max_output_tokens: 16384
   openai_compat: # OpenAI-compatible APIs; model names change, check with llm-models
     groq: # key: https://console.groq.com/keys -> GROQ_API_KEY
       url: https://api.groq.com/openai/v1
-      model: openai/gpt-oss-20b
+      model: openai/gpt-oss-120b # largest model on the key (also: openai/gpt-oss-20b, qwen/qwen3.8-27b)
       key_env: GROQ_API_KEY
     cerebras: # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
       url: https://api.cerebras.ai/v1
       model: gpt-oss-120b
       key_env: CEREBRAS_API_KEY
-    openrouter: # optional, not in the chain by default; ":free" models are rate-capped
+    openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY; ":free" models are rate-capped
       url: https://openrouter.ai/api/v1
-      model: "meta-llama/llama-3.3-70b-instruct:free"
+      model: "meta-llama/llama-3.3-70b-instruct:free" # check: uv run unseen llm-models --provider openrouter
       key_env: OPENROUTER_API_KEY
   temperature:
     concepts: 1.0

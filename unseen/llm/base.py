@@ -122,6 +122,22 @@ def extract_json(text: str) -> str:
     return text[start:end + 1]
 
 
+TRUNCATION_REASONS = {"length", "max_tokens", "MAX_TOKENS"}
+MAX_TOKEN_CEILING = 16384
+
+
+def looks_truncated(raw: str, exc: Exception, reason: str | None) -> bool:
+    """Cut off at the token limit: reported by the API, or JSON that starts but never closes."""
+    if reason in TRUNCATION_REASONS:
+        return True
+    tail = raw.rstrip()
+    if "{" not in tail:
+        return False   # no JSON at all: a different failure
+    if isinstance(exc, json.JSONDecodeError) and exc.pos >= len(exc.doc) - 2:
+        return True
+    return not tail.endswith(("}", "```"))
+
+
 def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, name: str,
              temperature: float = 0.7, max_tokens: int = 4096, max_retries: int = 2,
              check: Callable[[T], list[str]] | None = None,
@@ -136,6 +152,7 @@ def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, 
         stats.attempts += 1
         log(f"  llm[{name}] attempt {stats.attempts} ({provider.name}:{provider.model}) ...")
         raw, usage = provider.complete_json(system, prompt, schema, temperature, max_tokens)
+        stats.provider, stats.model = provider.name, provider.model   # a fallback may have switched
         stats.prompt_tokens += int(usage.get("prompt_tokens") or 0)
         stats.output_tokens += int(usage.get("output_tokens") or 0)
         stats.seconds = round(time.monotonic() - t0, 1)
@@ -143,17 +160,24 @@ def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, 
             obj = model_cls.model_validate(json.loads(extract_json(raw)))
         except (ValueError, ValidationError) as exc:
             reason = usage.get("done_reason")
-            cut = " OUTPUT WAS CUT OFF AT THE TOKEN LIMIT;" if reason in ("length", "max_tokens", "MAX_TOKENS") else ""
+            truncated = looks_truncated(raw, exc, reason)
+            cut = " OUTPUT WAS CUT OFF AT THE TOKEN LIMIT;" if truncated else ""
             detail = (f"done_reason={reason};{cut} output_tokens={usage.get('output_tokens')} "
-                      f"thinking_chars={usage.get('thinking_chars')} | {str(exc)[:600]} | "
-                      f"output starts: {raw[:200]!r}")
+                      f"thinking={usage.get('thinking_tokens') or usage.get('thinking_chars')} | "
+                      f"{str(exc)[:600]} | output starts: {raw[:200]!r}")
             log(f"  llm[{name}] invalid output: {detail[:400]}")
             if stats.attempts > max_retries:
                 if best:
                     return best[0], stats, best[1]
                 raise LLMError(f"{name}: invalid output after {stats.attempts} attempts: {detail}")
-            prompt = (f"{user}\n\nYour previous answer was not valid JSON for the schema:\n{str(exc)[:1500]}\n"
-                      f"Return ONLY the corrected JSON object.")
+            if truncated:   # retrying with the same budget would fail the same way
+                max_tokens = min(max_tokens * 2, MAX_TOKEN_CEILING)
+                log(f"  llm[{name}] retrying with a larger token budget ({max_tokens}) and a shorter answer")
+                prompt = (f"{user}\n\nYour previous answer was cut off before the JSON was complete. Keep every "
+                          f"text field short and return ONLY the complete JSON object.")
+            else:
+                prompt = (f"{user}\n\nYour previous answer was not valid JSON for the schema:\n{str(exc)[:1500]}\n"
+                          f"Return ONLY the corrected JSON object.")
             continue
         problems = check(obj) if check else []
         if best is None or len(problems) < len(best[1]):

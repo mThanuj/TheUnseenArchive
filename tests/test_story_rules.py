@@ -134,3 +134,15 @@ def test_generate_gives_up_with_clear_error():
     provider = FakeProvider({"Critique": [CRITIQUE_PASS]})
     obj, _, _ = generate(provider, Critique, system="s", user="u", name="critique", log=lambda m: None)
     assert obj.verdict == "pass"
+
+
+def test_first_person_slips_are_flagged_but_quotes_allowed(cfg):
+    from unseen.story.validate import first_person_slip
+    assert first_person_slip("Footsteps echo from above, but the shadow just passed me.")
+    assert first_person_slip("My lamp was out.")
+    assert not first_person_slip('The last log reads: "I am opening the door."')
+    assert not first_person_slip("Nobody at the motel owns a camera like hers.")
+    d = draft_dict()
+    d["narration"][1]["text"] = "I watched the corridor light flicker."
+    probs = validate_story(StoryDraft.model_validate(d), cfg, 30, "fiction_horror")
+    assert any("line 2 uses I/me/my" in p for p in probs)

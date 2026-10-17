@@ -12,7 +12,7 @@ import re
 
 from .config import StoryConfig
 from .models import Claim, LineFixes, StoryDraft, StoryPatch
-from .validate import banned_in, sanitize_video_prompt, speech_seconds, words
+from .validate import banned_in, first_person_slip, sanitize_video_prompt, speech_seconds, words
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -123,6 +123,8 @@ def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
     for n in d.narration:
         if len(words(n.text)) > r.narration_line_max_words:
             add(n.id, f"at most {r.narration_line_max_words} words")
+        if first_person_slip(n.text):
+            add(n.id, "the Archivist narrates in the third person: no I/me/my (quote a log line if needed)")
         for c in r.banned_cliches:
             if c.lower() in n.text.lower():
                 add(n.id, f"remove the cliche '{c}'")

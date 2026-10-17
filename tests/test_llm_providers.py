@@ -93,3 +93,82 @@ def test_chain_skips_providers_without_keys(monkeypatch, no_keys):
     assert make_provider(cfg, "ollama").name == "ollama"
     with pytest.raises(ValueError, match="unknown LLM provider"):
         make_provider(cfg, "nonexistent")
+
+
+def test_truncated_output_retries_with_a_bigger_budget():
+    from pydantic import BaseModel
+    from unseen.llm.base import generate, looks_truncated
+
+    class Small(BaseModel):
+        title: str
+        lines: list[str]
+
+    budgets = []
+
+    class Cutoff:
+        name, model = "gemini", "g"
+
+        def complete_json(self, system, user, schema, temperature, max_tokens):
+            budgets.append(max_tokens)
+            if len(budgets) == 1:   # cut mid-way, API gives no finish reason
+                return '{"title": "x", "lines": ["a", "b"', {"done_reason": None}
+            return '{"title": "x", "lines": ["a"]}', {"done_reason": "STOP"}
+
+    obj, stats, _ = generate(Cutoff(), Small, system="s", user="u", name="script", max_tokens=5000,
+                             log=lambda m: None)
+    assert obj.title == "x" and budgets == [5000, 10000] and stats.attempts == 2
+    import json as _json
+    try:
+        _json.loads('{"a": [1, 2')
+    except _json.JSONDecodeError as exc:
+        assert looks_truncated('{"a": [1, 2', exc, None)
+    assert looks_truncated("{}", ValueError("x"), "MAX_TOKENS")
+    assert not looks_truncated("{}", ValueError("schema mismatch"), "STOP")
+
+
+def test_gemini_caps_thinking_and_drops_it_for_models_without(monkeypatch, no_keys):
+    from unseen.llm import gemini
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    sent = []
+    good = {"candidates": [{"content": {"parts": [{"text": "thinking...", "thought": True}, {"text": "{}"}]},
+                            "finishReason": "STOP"}],
+            "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 2, "thoughtsTokenCount": 900}}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append(_copy(json))
+        if "thinkingConfig" in json["generationConfig"] and len(sent) == 1:
+            return Resp(400, text="thinking budget is not supported for this model")
+        return Resp(200, good)
+
+    monkeypatch.setattr(gemini.httpx, "post", fake_post)
+    p = gemini.GeminiProvider("https://g/v1beta", "m", thinking_budget=1024, max_output_tokens=16384)
+    text, usage = p.complete_json("s", "u", {}, 0.5, 5000)
+    assert sent[0]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 1024}
+    assert sent[0]["generationConfig"]["maxOutputTokens"] == 16384
+    assert "thinkingConfig" not in sent[1]["generationConfig"] and p.thinking_budget is None
+    assert text == "{}" and usage["thinking_tokens"] == 900 and usage["done_reason"] == "STOP"
+
+
+def _copy(body):
+    import copy
+    return copy.deepcopy(body)
+
+
+def test_critic_is_a_different_hosted_model(tmp_path, monkeypatch):
+    from storyfakes import CONCEPTS, CRITIQUE_PASS, FakeEmbedder, FakeProvider, draft_dict
+    import unseen.story.render as render
+    from unseen.state.db import StateDB
+    from unseen.story.engine import StoryEngine
+
+    monkeypatch.setattr(render, "STORIES_DIR", tmp_path / "stories")
+    writer = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict()], "Critique": [CRITIQUE_PASS]})
+    writer.name = "gemini"
+    critic = FakeProvider({"Critique": [CRITIQUE_PASS]})
+    critic.name = "groq"
+    local = FakeProvider({})
+    local.name = "ollama"
+    engine = StoryEngine(provider=FallbackProvider([writer, critic, local], log=lambda m: None),
+                         db=StateDB(tmp_path / "t.db"), embedder=FakeEmbedder(), seed=5, log=lambda m: None)
+    record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
+    assert writer.calls == ["ConceptList", "StoryDraft"] and critic.calls == ["Critique"] and local.calls == []
+    assert [s["provider"] for s in record.llm] == ["gemini", "gemini", "groq"]

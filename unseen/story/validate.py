@@ -62,6 +62,16 @@ def speech_seconds(text: str, wps: float) -> float:
     return len(words(text)) / wps
 
 
+FIRST_PERSON = re.compile(r"\bI\b|\b(?i:me|my|mine|myself)\b")
+
+
+def first_person_slip(text: str) -> bool:
+    """The Archivist speaks in the third person; quoted log lines/voices may use 'I'."""
+    if any(q in text for q in ('"', "“", "”")):
+        return False
+    return bool(FIRST_PERSON.search(text))
+
+
 def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, category: str,
                    claims: list[Claim] | None = None) -> list[str]:
     r, length = cfg.rules, cfg.length
@@ -79,6 +89,8 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
     for n in d.narration:
         if len(words(n.text)) > r.narration_line_max_words:
             problems.append(f"narration line {n.id} has {len(words(n.text))} words; max {r.narration_line_max_words}")
+        if first_person_slip(n.text):
+            problems.append(f"narration line {n.id} uses I/me/my; the Archivist narrates in the third person")
 
     # scenes and coverage
     if len(d.scenes) > length.max_scenes:

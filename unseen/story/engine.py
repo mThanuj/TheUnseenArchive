@@ -45,7 +45,9 @@ def build_provider(cfg: LLMCfg, name: str):
                               think=cfg.ollama.think)
     if name == "gemini":
         from ..llm.gemini import GeminiProvider
-        return GeminiProvider(cfg.gemini.url, cfg.gemini.model, cfg.gemini.timeout_s)
+        return GeminiProvider(cfg.gemini.url, cfg.gemini.model, cfg.gemini.timeout_s,
+                              thinking_budget=cfg.gemini.thinking_budget,
+                              max_output_tokens=cfg.gemini.max_output_tokens)
     if name in cfg.openai_compat:
         from ..llm.openai_compat import OpenAICompatProvider
         c = cfg.openai_compat[name]
@@ -174,9 +176,9 @@ class StoryEngine:
 
     # ------------------------------------------------------------------ steps
     def _gen(self, model_cls, *, user: str, name: str, temperature: float, max_tokens: int, check=None,
-             retries: int | None = None):
+             retries: int | None = None, provider=None):
         obj, stats, problems = generate(
-            self.provider, model_cls, system=system_prompt(self.cfg), user=user, name=name,
+            provider or self.provider, model_cls, system=system_prompt(self.cfg), user=user, name=name,
             temperature=temperature, max_tokens=max_tokens,
             max_retries=self.cfg.llm.max_retries if retries is None else retries,
             check=check, log=self.log)
@@ -206,6 +208,30 @@ class StoryEngine:
             self.log(f"  warning: every concept resembles a past story (best similarity {sims[best]:.2f})")
         self.log("  concepts: " + "; ".join(f"'{concepts[i].title}' sim={sims[i]:.2f}" for i in order))
         return concepts[best], round(sims[best], 3), vecs[best], [concepts[i] for i in order[1:]]
+
+    def critic_provider(self):
+        """A different hosted model than the writer when available (models grade themselves kindly)."""
+        from ..llm.fallback import FallbackProvider
+        p = self.provider
+        if isinstance(p, FallbackProvider):
+            writer = p.providers[p.active].name
+            others = [q for q in p.providers[p.active + 1:] + p.providers[:p.active]
+                      if q.name not in (writer, "ollama")]   # the local model is too slow to add a pass
+            if others:
+                return others[0]
+        return p
+
+    def critique(self, draft: StoryDraft, category: str) -> Critique | None:
+        user = critique_prompt(self.cfg, draft, category)
+        critic = self.critic_provider()
+        for provider in ([critic, self.provider] if critic is not self.provider else [self.provider]):
+            try:
+                critique, _ = self._gen(Critique, user=user, name="critique", provider=provider,
+                                        temperature=self.cfg.llm.temperature.critique, max_tokens=1500)
+                return critique
+            except LLMError as exc:
+                self.log(f"  critique by {provider.name} failed: {str(exc)[:200]}")
+        return None
 
     def polish(self, draft: StoryDraft, target: int, category: str, claims: list[Claim] | None,
                rounds: int = 2) -> None:
@@ -267,12 +293,7 @@ class StoryEngine:
                              temperature=self.cfg.llm.temperature.script, max_tokens=5000)
         self.polish(draft, target, category, claims)
 
-        critique, revised = None, False
-        try:
-            critique, _ = self._gen(Critique, user=critique_prompt(self.cfg, draft, category), name="critique",
-                                    temperature=self.cfg.llm.temperature.critique, max_tokens=1500)
-        except LLMError as exc:
-            self.log(f"  critique skipped: {exc}")
+        critique, revised = self.critique(draft, category), False
         if critique and (critique.verdict == "revise"
                          or min(critique.scores().values()) < self.cfg.rules.min_critique_score):
             try:   # optional step: one attempt only, a failure keeps the unrevised (already valid) draft

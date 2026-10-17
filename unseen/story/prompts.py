@@ -44,14 +44,16 @@ def concepts_prompt(cfg: StoryConfig, category: str, target_seconds: int, ingred
              f"{target_seconds} seconds (one Reel)."]
     if category == "real_mystery" and topic:
         parts.append(f"The case: {topic.wikipedia} ({topic.year}). Every concept must be built only from "
-                     f"these sourced claims (no invented facts):\n{_claims_block(claims or [])}")
+                     f"these sourced claims (no invented facts). Refer to private people by role, not name, "
+                     f"unless they are long-dead historical figures:\n{_claims_block(claims or [])}")
     else:
         parts.append("Use these ingredients as a starting point (you may twist them):\n"
                      + "\n".join(f"- {k}: {v}" for k, v in ingredients.items()))
     if recent_titles:
         parts.append("Recent stories on the channel (do NOT repeat their premise, setting or twist):\n"
                      + "\n".join(f"- {t}" for t in recent_titles))
-    parts.append("Make the 5 concepts genuinely different from each other in premise, device and ending.")
+    parts.append("Make the 5 concepts genuinely different from each other in premise, device and ending. "
+                 "Each anomaly must be something a camera can SHOW, not only something heard or felt.")
     return "\n\n".join(parts)
 
 
@@ -84,22 +86,35 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
         "sfx: 1-3 cues per scene placed where the action happens (a door opening, footsteps, a hum that "
         "stops). Use 'silence' right before the biggest reveal.",
         "osd: realistic camera overlay text for the device (timestamps, CAM numbers, REC) matching the era.",
+        "Visual storytelling (the footage must carry the story on its own, even muted):\n"
+        "- No two consecutive scenes may repeat the same framing and action; use at least 4 distinct setups "
+        "(e.g. wide establishing, detail, reveal, aftermath) across the Reel.\n"
+        "- The anomaly must be VISIBLE on screen in at least two scenes and escalate (subtle -> undeniable); "
+        "sound and narration support it, they do not replace it.\n"
+        "- If the twist depends on something (time running backwards, a second camera, a missing minute), "
+        "plant a visual clue for it before the reveal.\n"
+        "- The Archivist narrates in the third person about the recording and the people in it (never 'I' or "
+        "'me' as the person filming), except when quoting a log or a voice heard on the tape.",
     ]
     if category == "real_mystery":
         parts.append("Real case rules: every factual narration line lists the claim_ids it relies on. "
                      "Claims tagged disputed/theory/legend must be hedged in the line (reportedly, some believe, "
-                     "according to...). Never add facts that are not in the claims. Visuals are a dramatized "
-                     "reconstruction.\nClaims:\n" + _claims_block(claims or []))
+                     "according to...). Never add facts that are not in the claims. Refer to private people by "
+                     "their role (the photographer, his daughter, a crew member), not by name, unless they are "
+                     "long-dead historical figures; never speculate about anyone's guilt or character. Visuals are "
+                     "a dramatized reconstruction.\nClaims:\n" + _claims_block(claims or []))
     return "\n\n".join(parts)
 
 
 def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
     return (f"Critique this Reel script ({CATEGORY_BRIEF[category]}) as a demanding horror editor and as a "
-            f"text-to-video specialist. Score each dimension 1-10 honestly (7 = publishable). In issues, list "
-            f"concrete, actionable fixes with line/scene ids: weak hook, predictable turn, filler, confusing "
-            f"continuity, shots a video model will render badly (text, hands, crowds, close-up faces, too "
-            f"much happening), an ending that does not land. verdict = 'revise' if any score is below 7.\n\n"
-            f"{draft.model_dump_json()}")
+            f"text-to-video specialist. Be harsh and calibrated: typical first drafts score 5-7; 8 means "
+            f"strong; 9-10 only for work you would publish today unchanged. In issues, list concrete, "
+            f"actionable fixes with line/scene ids: weak hook, predictable turn, filler, repetitive shots "
+            f"(the same action in several scenes), an anomaly that is only heard or narrated but never seen, "
+            f"a twist without a visual clue, narrator perspective slips, confusing continuity, shots a video "
+            f"model will render badly (text, hands, crowds, close-up faces, too much happening), an ending that "
+            f"does not land. verdict = 'revise' if any score is below 7.\n\n{draft.model_dump_json()}")
 
 
 def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique) -> str:

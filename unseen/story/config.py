@@ -19,6 +19,8 @@ class GeminiCfg(BaseModel):
     url: str
     model: str
     timeout_s: float = 300
+    thinking_budget: int | None = 1024
+    max_output_tokens: int = 16384
 
 
 class Temperatures(BaseModel):
@@ -35,7 +37,7 @@ class OpenAICompatCfg(BaseModel):
 
 
 class LLMCfg(BaseModel):
-    chain: list[str] = ["openrouter", "ollama"]
+    chain: list[str] = ["ollama"]   # the real order lives in config/story.yaml (llm.chain)
     ollama: OllamaCfg
     gemini: GeminiCfg
     openai_compat: dict[str, OpenAICompatCfg] = {}

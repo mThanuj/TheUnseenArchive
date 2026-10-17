@@ -95,13 +95,14 @@ class Critique(BaseModel):
     originality: int = Field(ge=1, le=10)
     ending: int = Field(ge=1, le=10)
     visual_feasibility: int = Field(ge=1, le=10, description="can a text-to-video model render every shot believably")
+    visual_variety: int = Field(ge=1, le=10, description="distinct shots, and the anomaly visibly escalates on screen")
     brand_fit: int = Field(ge=1, le=10)
     issues: list[str] = Field(description="concrete problems with line/scene ids and how to fix them")
     verdict: Literal["pass", "revise"]
 
     def scores(self) -> dict[str, int]:
         return {k: getattr(self, k) for k in ("hook", "escalation", "coherence", "originality",
-                                              "ending", "visual_feasibility", "brand_fit")}
+                                              "ending", "visual_feasibility", "visual_variety", "brand_fit")}
 
 
 class LineFix(BaseModel):

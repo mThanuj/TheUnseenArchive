@@ -46,7 +46,7 @@ def draft(**over) -> StoryDraft:
 
 
 CRITIQUE_PASS = {"hook": 8, "escalation": 8, "coherence": 8, "originality": 8, "ending": 8,
-                 "visual_feasibility": 8, "brand_fit": 8, "issues": [], "verdict": "pass"}
+                 "visual_feasibility": 8, "visual_variety": 8, "brand_fit": 8, "issues": [], "verdict": "pass"}
 
 CONCEPTS = {"concepts": [
     {"title": "Room Nine", "logline": "A night clerk films an empty motel room that keeps changing.",
