@@ -32,6 +32,16 @@ Craft rules:
 - Implication beats explanation. Silence before a reveal. The last line lands on a concrete,
   disturbing or thought-provoking detail, never a question and never "or is it".
 - Believable and documentary-like, never Hollywood. Ordinary places, ordinary people, one wrong detail.
+- The Archivist states facts: times, counts, objects, names of places. Never adjectives that tell the
+  viewer how to feel (eerie, mysterious, chilling, sinister...). Short sentences. Precise numbers.
+- The first scene shows something wrong within the first second; the last line points the viewer at a
+  detail they missed, so they rewatch (e.g. "Watch the mirror, not the bed.").
+
+Voice examples (style only; never reuse their content):
+- "Tape four. The family checked out at 9:14. The camera kept recording the empty room. At 9:31 the
+  bed is unmade again. Housekeeping logged no entry. Watch the mirror, not the bed."
+- "The trail camera fired forty times between two and three a.m. Thirty-nine frames are empty. In
+  frame thirty-eight, it is close enough to see that it is wearing his coat."
 - Avoid these cliches: {", ".join(r.banned_cliches)}.
 - Content limits: {r.content_limits}
 
@@ -100,10 +110,19 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
         "sound and narration support it, they do not replace it.\n"
         "- If the twist depends on something (time running backwards, a second camera, a missing minute), "
         "plant a visual clue for it before the reveal.\n"
+        "- No readable text anywhere in a shot (no printouts, screens with words, handwriting, signs, labels, "
+        "quoted words): video models render it as gibberish. Show the object, not the writing.\n"
+        "- recorded_year is when the footage was shot; every scene's device must exist by then (devices list "
+        "shows the first year). Keep the place, era and clothing consistent with it.\n"
         "- The Archivist narrates in the third person about the recording and the people in it (never 'I' or "
         "'me' as the person filming), except when quoting a log or a voice heard on the tape.",
     ]
     if category == "real_mystery":
+        parts.append("Real case era: the footage is EITHER period footage shot around the event (only devices "
+                     "that existed then; before ~1925 no film camera existed) OR a present-day revisit of the "
+                     "place (recorded_year = this year, modern devices) narrated over what remains today. "
+                     "Pick one and keep every scene consistent with it. Visual details of real places and "
+                     "objects must match the claims marked [visual]; never invent their appearance.")
         parts.append("Real case rules: every factual narration line lists the claim_ids it relies on. "
                      "Claims tagged disputed/theory/legend must be hedged in the line (reportedly, some believe, "
                      "according to...). Never add facts that are not in the claims. Refer to private people by "
@@ -124,8 +143,9 @@ def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
             f"does not land. verdict = 'revise' if any score is below 7.\n\n{draft.model_dump_json()}")
 
 
-def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique) -> str:
-    return (f"{base_prompt}\n\nA previous draft:\n{draft.model_dump_json()}\n\nThe editor's critique "
+def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique, checks: list[str] | None = None) -> str:
+    extra = ("\n\nAutomatic checks also failed (fix these too):\n- " + "\n- ".join(checks)) if checks else ""
+    return (f"{base_prompt}\n\nA previous draft:\n{draft.model_dump_json()}{extra}\n\nThe editor's critique "
             f"(scores {critique.scores()}):\n- " + "\n- ".join(critique.issues)
             + "\n\nWrite the improved, complete script. Keep what works; fix every issue. If hook, "
               "escalation, originality, ending or visual variety scored below 7, rework the scene structure "
@@ -175,10 +195,34 @@ def line_repair_prompt(cfg: StoryConfig, draft: StoryDraft, issues: dict[int, st
 def claims_prompt(topic: Topic, source_text: str) -> str:
     return (f"Below is source text about '{topic.wikipedia}'. Extract 8-14 atomic claims that a short, "
             f"eerie but faithful retelling would need: what happened, when, where, what was found, what "
-            f"remains unexplained, and the main explanations proposed. Use ONLY this text. For each claim, "
+            f"remains unexplained, and the main explanations proposed. Also include 1-3 claims describing what "
+            f"the key place or object physically looked like, if the text says (mark them visual=true). Use "
+            f"ONLY this text. For each claim, "
             f"copy a supporting quote VERBATIM from the text (max 30 words) and tag it.\n\n"
             f"SOURCE TEXT:\n{source_text}")
 
 
 def _claims_block(claims: list[Claim]) -> str:
-    return "\n".join(f"[{c.id}] ({c.tag}) {c.text}" for c in claims)
+    return "\n".join(f"[{c.id}] ({c.tag}{', visual' if c.visual else ''}) {c.text}" for c in claims)
+
+
+def fact_check_prompt(draft: StoryDraft, claims: list[Claim]) -> str:
+    sourced = "\n".join(f"[{c.id}] ({c.tag}) {c.text}\n    source: \"{c.quote}\"" for c in claims)
+    lines = "\n".join(f"[{n.id}] {n.text}  (cites {n.claim_ids or 'nothing'})" for n in draft.narration)
+    return ("You are a strict fact-checker for a dramatized documentary Reel. For every narration line, judge "
+            "whether it says ONLY what its cited claims (and their source quotes) support. Hedged wording of "
+            "theories/legends is fine; adding specifics, picking one side of an open question, or contradicting "
+            "a claim is not. Lines with no factual assertion are 'atmospheric'. For unsupported or contradicted "
+            "lines, write a corrected line that keeps the tone but states only what the claims support.\n\n"
+            f"CLAIMS:\n{sourced}\n\nNARRATION:\n{lines}")
+
+
+def scene_repair_prompt(cfg: StoryConfig, draft: StoryDraft, issues: dict[int, str]) -> str:
+    devices = "\n".join(f"- {d.id} (from {d.since}): {d.desc}" for d in cfg.ingredients.device)
+    todo = "\n".join(f"[scene {i}] device={next(s.device for s in draft.scenes if s.id == i)}\n"
+                     f"    prompt: {next(s.video_prompt for s in draft.scenes if s.id == i)}\n    problem: {why}"
+                     for i, why in sorted(issues.items()))
+    return (f"Story: {draft.title} (footage recorded in {draft.recorded_year}). Rewrite ONLY these scenes so "
+            f"they keep their purpose in the story but fix the problems. Video prompts: one literal paragraph, "
+            f"{cfg.rules.video_prompt_words.min}-{cfg.rules.video_prompt_words.max} words, visible motion, no "
+            f"readable text.\n\nDevices (first year available):\n{devices}\n\n{todo}")

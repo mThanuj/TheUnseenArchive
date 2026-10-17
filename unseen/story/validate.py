@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from datetime import datetime
 
 from .config import StoryConfig
 from .models import Claim, StoryDraft
@@ -65,6 +66,32 @@ def speech_seconds(text: str, wps: float) -> float:
 FIRST_PERSON = re.compile(r"\bI\b|\b(?i:me|my|mine|myself)\b")
 
 
+QUOTED = re.compile(r'["“”][^"“”]{1,40}["“”]|(?<![\w])\'[^\']{1,30}\'(?![\w])')
+
+
+def readable_text_risk(prompt: str, risk_words: list[str]) -> list[str]:
+    """Words/quotes that ask the video model to render legible text (it renders gibberish)."""
+    found = banned_in(prompt, risk_words)
+    found += [m.group(0) for m in QUOTED.finditer(prompt)]
+    return found
+
+
+def era_problems(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int | None) -> list[str]:
+    since = {dev.id: dev.since for dev in cfg.ingredients.device}
+    problems = []
+    for s in d.scenes:
+        first = since.get(s.device, 1900)
+        if first > d.recorded_year:
+            problems.append(f"scene {s.id}: a {s.device} could not record footage in {d.recorded_year} "
+                            f"(available from {first}); use a period device or change recorded_year")
+    if category == "real_mystery" and event_year:
+        now = datetime.now().year
+        if not (event_year - 1 <= d.recorded_year <= event_year + 15 or d.recorded_year >= now - 3):
+            problems.append(f"recorded_year {d.recorded_year} fits neither period footage of the case "
+                            f"({event_year}-{event_year + 15}) nor a present-day revisit ({now - 3} or later)")
+    return problems
+
+
 def first_person_slip(text: str) -> bool:
     """The Archivist speaks in the third person; quoted log lines/voices may use 'I'."""
     if any(q in text for q in ('"', "“", "”")):
@@ -73,7 +100,7 @@ def first_person_slip(text: str) -> bool:
 
 
 def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, category: str,
-                   claims: list[Claim] | None = None) -> list[str]:
+                   claims: list[Claim] | None = None, event_year: int | None = None) -> list[str]:
     r, length = cfg.rules, cfg.length
     problems: list[str] = []
     wps = length.words_per_second
@@ -91,6 +118,9 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
             problems.append(f"narration line {n.id} has {len(words(n.text))} words; max {r.narration_line_max_words}")
         if first_person_slip(n.text):
             problems.append(f"narration line {n.id} uses I/me/my; the Archivist narrates in the third person")
+        told = banned_in(n.text, r.narration_banned_words)
+        if told:
+            problems.append(f"narration line {n.id} uses {told}; state facts and let the footage do the work")
 
     # scenes and coverage
     if len(d.scenes) > length.max_scenes:
@@ -131,6 +161,11 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
         if bad:
             problems.append(f"scene {s.id} video_prompt contains {bad}; describe the scene itself, "
                             f"degradation and on-screen text are added later")
+        text = readable_text_risk(s.video_prompt, r.video_prompt_text_risk)
+        if text:
+            problems.append(f"scene {s.id} video_prompt asks for readable text {text}; show the object "
+                            f"without legible writing")
+    problems += era_problems(d, cfg, category, event_year)
 
     # clichés
     text = " ".join([d.logline, *(n.text for n in d.narration)]).lower()

@@ -34,7 +34,8 @@ def draft_dict(**over) -> dict:
                "osd": "REC  10-17-2004  02:13", "sfx": [{"at": 0.5, "sound": "door", "note": "slow creak"}]}
               for i, ids in enumerate(assign)]
     d = {"title": "Room Nine", "logline": "A night clerk films an empty motel room that keeps changing.",
-         "archive_entry": "ENTRY 0412 - camcorder tape - recovered 2004, Ashby", "narration": narration,
+         "archive_entry": "ENTRY 0412 - camcorder tape - recovered 2004, Ashby", "recorded_year": 2004,
+         "narration": narration,
          "scenes": scenes, "ending_note": "The camera is not hers.", "tags": ["motel", "camcorder"],
          "caption": "Recovered from a motel lost-and-found."}
     d.update(over)

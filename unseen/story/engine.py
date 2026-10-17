@@ -25,13 +25,14 @@ import numpy as np
 from ..llm.base import LLMError, generate
 from ..state.db import StateDB
 from .config import LLMCfg, StoryConfig, Topic, load_story_config, load_topics
-from .models import (Claim, ClaimList, Concept, ConceptList, ConceptRatings, Critique, LineFixes, Source,
-                     StoryDraft, StoryPatch, StoryRecord)
+from .models import (Claim, ClaimList, Concept, ConceptList, ConceptRatings, Critique, FactCheck, LineFixes,
+                     SceneFixes, Source, StoryDraft, StoryPatch, StoryRecord)
 from .novelty import Embedder, FastEmbedder, concept_text, max_similarity
-from .prompts import (claims_prompt, concept_rating_prompt, concepts_prompt, critique_prompt, line_repair_prompt,
-                      patch_prompt, revise_prompt, script_prompt, system_prompt)
+from .prompts import (claims_prompt, concept_rating_prompt, concepts_prompt, critique_prompt, fact_check_prompt,
+                      line_repair_prompt, patch_prompt, revise_prompt, scene_repair_prompt, script_prompt,
+                      system_prompt)
 from .render import save_story
-from .repair import apply_line_fixes, apply_patch, auto_fix, line_issues
+from .repair import apply_line_fixes, apply_patch, apply_scene_fixes, auto_fix, line_issues, scene_issues
 from .research import ResearchError, fetch_article, trim_source
 from .validate import validate_story, verify_claims
 
@@ -96,6 +97,7 @@ class StoryEngine:
         self._embedder = embedder
         self.fetch = fetch
         self.stats: list[dict] = []
+        self.event_year: int | None = None   # real mysteries: the case's year (era checks)
 
     # --------------------------------------------------------------- choices
     @property
@@ -233,10 +235,13 @@ class StoryEngine:
     def is_local(self) -> bool:
         return self.provider.name == "ollama"
 
-    def needs_revision(self, c: Critique) -> bool:
+    def needs_revision(self, c: Critique, problems: list[str] | None = None) -> bool:
         s = c.scores()
-        return (c.verdict == "revise" or min(s.values()) < self.cfg.rules.min_critique_score
+        return (bool(problems) or c.verdict == "revise" or min(s.values()) < self.cfg.rules.min_critique_score
                 or sum(s.values()) / len(s) < self.cfg.quality.target_avg_score)
+
+    def checks(self, draft: StoryDraft, target: int, category: str, claims: list[Claim] | None) -> list[str]:
+        return validate_story(draft, self.cfg, target, category, claims, self.event_year)
 
     @staticmethod
     def _avg(c: Critique) -> float:
@@ -254,9 +259,10 @@ class StoryEngine:
             return draft, None, False, []
         history = [{"round": 0, "scores": critique.scores(), "avg": self._avg(critique), "kept": True}]
         best, best_c, revised = draft, critique, False
+        best_p = self.checks(best, target, category, claims)
         local = self.is_local()
         for rnd in range(1, (1 if local else self.cfg.quality.revision_rounds) + 1):
-            if not self.needs_revision(best_c):
+            if not self.needs_revision(best_c, best_p):
                 break
             try:
                 if local:
@@ -267,7 +273,7 @@ class StoryEngine:
                     self.log(f"  patch: {', '.join(apply_patch(cand, patch, category)) or 'no changes'}")
                 else:
                     cand, _ = self._gen(StoryDraft, name=f"rewrite-{rnd}", temperature=self.cfg.llm.temperature.script,
-                                        max_tokens=5000, retries=1, user=revise_prompt(base, best, best_c))
+                                        max_tokens=5000, retries=1, user=revise_prompt(base, best, best_c, best_p))
             except LLMError as exc:
                 self.log(f"  revision skipped: {str(exc)[:200]}")
                 break
@@ -275,12 +281,16 @@ class StoryEngine:
             c = self.critique(cand, category)
             if c is None:
                 break
-            better = self._avg(c) > self._avg(best_c)
-            history.append({"round": rnd, "scores": c.scores(), "avg": self._avg(c), "kept": better})
-            self.log(f"  revision {rnd}: avg {self._avg(best_c)} -> {self._avg(c)}"
-                     + ("" if better else " (lower: keeping the previous version)"))
+            cand_p = self.checks(cand, target, category, claims)
+            # each unresolved automatic check costs half a point: an anachronism or an unsupported fact
+            # should not win just because the prose scored slightly higher
+            better = self._avg(c) - 0.5 * len(cand_p) > self._avg(best_c) - 0.5 * len(best_p)
+            history.append({"round": rnd, "scores": c.scores(), "avg": self._avg(c), "checks": len(cand_p),
+                            "kept": better})
+            self.log(f"  revision {rnd}: avg {self._avg(best_c)} -> {self._avg(c)}, checks {len(best_p)} -> "
+                     f"{len(cand_p)}" + ("" if better else " (worse: keeping the previous version)"))
             if better:
-                best, best_c, revised = cand, c, True
+                best, best_c, best_p, revised = cand, c, cand_p, True
         return best, best_c, revised, history
 
     def critic_provider(self):
@@ -308,16 +318,59 @@ class StoryEngine:
                 self.log(f"  critique by {provider.name} failed: {str(exc)[:200]}")
         return None
 
+    def fact_check(self, draft: StoryDraft, claims: list[Claim]) -> list[dict]:
+        """Real mysteries: an independent model checks each line against the claims it cites and
+        corrected wording replaces unsupported/contradicted lines."""
+        critic = self.critic_provider()
+        result = None
+        for provider in ([critic, self.provider] if critic is not self.provider else [self.provider]):
+            try:
+                result, _ = self._gen(FactCheck, name="fact-check", provider=provider, temperature=0.1,
+                                      max_tokens=2000, user=fact_check_prompt(draft, claims))
+                break
+            except LLMError as exc:
+                self.log(f"  fact-check by {provider.name} failed: {str(exc)[:200]}")
+        if result is None:
+            return [{"id": None, "verdict": "not checked"}]
+        by_id = {n.id: n for n in draft.narration}
+        report = []
+        for v in result.lines:
+            line = by_id.get(v.id)
+            if line is None:
+                continue
+            entry = {"id": v.id, "verdict": v.verdict, "original": line.text}
+            if v.verdict in ("unsupported", "contradicted") and v.corrected.strip():
+                line.text = v.corrected.strip()
+                entry["corrected"] = line.text
+            report.append(entry)
+        bad = [e for e in report if e["verdict"] in ("unsupported", "contradicted")]
+        self.log(f"  fact-check: {len(report) - len(bad)} line(s) supported/atmospheric, {len(bad)} corrected"
+                 + ("" if all("corrected" in e for e in bad) else " (some without a correction)"))
+        return report
+
     def polish(self, draft: StoryDraft, target: int, category: str, claims: list[Claim] | None,
                rounds: int = 2) -> None:
-        """Deterministic fixes, then LLM rewrites of only the offending narration lines."""
+        """Deterministic fixes, then LLM rewrites of only the offending scenes and narration lines."""
         for _ in range(rounds):
             fixes = auto_fix(draft, self.cfg, target)
             if fixes:
                 self.log("  auto-fixed: " + "; ".join(fixes))
+            bad_scenes = scene_issues(draft, self.cfg, category, self.event_year)
+            if bad_scenes:
+                self.log(f"  rewriting {len(bad_scenes)} scene(s): "
+                         + "; ".join(f"{i}: {w}" for i, w in sorted(bad_scenes.items())))
+                try:
+                    scene_fixes, _ = self._gen(SceneFixes, name="scene-repair", temperature=0.5, max_tokens=2500,
+                                               user=scene_repair_prompt(self.cfg, draft, bad_scenes))
+                    apply_scene_fixes(draft, scene_fixes, set(bad_scenes))
+                    auto_fix(draft, self.cfg, target)
+                except LLMError as exc:
+                    self.log(f"  scene repair failed: {str(exc)[:200]}")
             issues = line_issues(draft, self.cfg, target, category, claims)
             if not issues:
-                return
+                if not bad_scenes:
+                    return
+                continue
             self.log(f"  rewriting {len(issues)} line(s): " + "; ".join(f"{i}: {w}" for i, w in sorted(issues.items())))
             try:
                 fixes_obj, _ = self._gen(LineFixes, name="repair", temperature=0.5, max_tokens=1200,
@@ -349,9 +402,11 @@ class StoryEngine:
         target = target_seconds or self.pick_length()
         ingredients = {} if category == "real_mystery" else self.sample_ingredients()
         topic, claims, sources = None, None, []
+        self.event_year = None
         if category == "real_mystery":
             topic, claims, source = self.research_some_topic(topic_id)
             sources = [source]
+            self.event_year = topic.year
         self.log(f"New story: {category}, ~{target} s" + (f", topic {topic.id}" if topic else
                                                           f", ingredients {ingredients}"))
 
@@ -363,15 +418,22 @@ class StoryEngine:
                                                                               recent_titles)
         self.log(f"  chosen: '{concept.title}' - {concept.logline}")
 
-        devices = {d.id: d.desc for d in self.cfg.ingredients.device}
+        devices = {d.id: f"{d.desc} (exists from {d.since})" for d in self.cfg.ingredients.device}
         base = script_prompt(self.cfg, category, target, concept, ingredients, devices, claims)
         draft, _ = self._gen(StoryDraft, user=base, name="script",
                              temperature=self.cfg.llm.temperature.script, max_tokens=5000)
         self.polish(draft, target, category, claims)
         draft, critique, revised, history = self.improve(draft, self.critique(draft, category), base, target,
                                                          category, claims)
+        fact_report: list[dict] = []
+        if category == "real_mystery" and claims:
+            fact_report = self.fact_check(draft, claims)
+            self.polish(draft, target, category, claims)   # corrected lines may need hedging/shortening
 
-        problems = validate_story(draft, self.cfg, target, category, claims)
+        problems = self.checks(draft, target, category, claims)
+        unsupported = [e for e in fact_report if e.get("verdict") in ("unsupported", "contradicted")
+                       and "corrected" not in e]
+        problems += [f"narration line {e['id']} is not supported by its claims (fact-check)" for e in unsupported]
 
         created = datetime.now()
         story_id = f"{created:%Y%m%d-%H%M%S}-{slugify(draft.title)}"
@@ -383,8 +445,8 @@ class StoryEngine:
             target_seconds=target, ingredients=ingredients, topic_id=topic.id if topic else None,
             concept=concept, concept_alternatives=alternatives, novelty_max_similarity=similarity,
             concept_ratings=ratings, draft=draft, critique=critique, critique_history=history,
-            revised=revised, problems=problems, sources=sources, claims=claims or [], llm=self.stats,
-            ai_disclosure=disclosure)
+            revised=revised, problems=problems, sources=sources, claims=claims or [], fact_check=fact_report,
+            llm=self.stats, ai_disclosure=disclosure)
         out = save_story(record)
         scores = critique.scores() if critique else {}
         self.db.add_story(

@@ -155,3 +155,49 @@ def test_script_prompt_asks_for_an_exact_scene_count(cfg):
     assert [scene_count(cfg, s) for s in (20, 30, 40, 50, 90)] == [5, 8, 10, 12, 12]
     p = script_prompt(cfg, "fiction_horror", 40, Concept.model_validate(CONCEPTS["concepts"][0]), {}, {}, None)
     assert "EXACTLY 10 scenes" in p and "at most 11 spoken words" in p
+
+
+def test_llm_near_miss_values_are_coerced():
+    from unseen.story.models import NarrationLine, Scene, SfxCue
+    base = dict(draft_dict()["scenes"][0])
+    assert Scene.model_validate({**base, "device": "Smartphone"}).device == "phone"
+    assert Scene.model_validate({**base, "device": "security camera"}).device == "cctv"
+    assert Scene.model_validate({**base, "device": "hologram"}).device == "camcorder"
+    assert SfxCue.model_validate({"at": 0.3, "sound": "click"}).sound == "machine"
+    assert NarrationLine.model_validate({"id": 1, "text": "x", "delivery": "precise"}).delivery == "flat"
+    assert Critique.model_validate({k: 7 for k in ("hook", "escalation", "coherence", "originality", "ending",
+                                                   "visual_feasibility", "visual_variety", "brand_fit")}
+                                   | {"issues": []}).verdict == "revise"
+
+
+def test_era_and_readable_text_checks(cfg):
+    d = draft_dict(recorded_year=1977)
+    d["scenes"][1]["device"] = "phone"
+    d["scenes"][2]["video_prompt"] = d["scenes"][2]["video_prompt"] + ' A printout reads "6EQUJ5" in red ink.'
+    d["narration"][0]["text"] = "An eerie tape from the motel."
+    probs = validate_story(StoryDraft.model_validate(d), cfg, 30, "fiction_horror")
+    assert any("scene 2: a phone could not record footage in 1977" in p for p in probs)
+    assert any("scene 3 video_prompt asks for readable text" in p for p in probs)
+    assert any("line 1 uses ['eerie']" in p for p in probs)
+    # real cases: period footage or a present-day revisit, nothing in between
+    ok_period = validate_story(StoryDraft.model_validate(draft_dict(recorded_year=1985)), cfg, 30,
+                               "real_mystery", [], 1981)
+    assert not any("recorded_year" in p for p in ok_period)
+    mid = validate_story(StoryDraft.model_validate(draft_dict(recorded_year=2004)), cfg, 30, "real_mystery", [], 1981)
+    assert any("recorded_year 2004 fits neither" in p for p in mid)
+
+
+def test_osd_dates_are_stripped_and_scene_issues_found(cfg):
+    from unseen.story.repair import apply_scene_fixes, clean_osd, scene_issues
+    from unseen.story.models import SceneFixes
+    d = draft(recorded_year=1977)
+    d.scenes[0].osd = "CAM 01  10-17-2026  20:03:12"
+    d.scenes[1].osd = "03:14:12 PM  REC"
+    d.scenes[2].osd = "REEL 04 - 1974"
+    clean_osd(d)
+    assert [s.osd for s in d.scenes[:3]] == ["CAM 01", "REC", "REEL 04"]
+    issues = scene_issues(d, cfg, "fiction_horror", None)
+    assert set(issues) == {s.id for s in d.scenes}          # camcorder (1983+) in 1977 everywhere
+    fixes = SceneFixes.model_validate({"scenes": [{"id": 1, "device": "16mm", "video_prompt": "A new prompt."}]})
+    assert apply_scene_fixes(d, fixes, {1}) == ["scene 1 rewritten"]
+    assert d.scenes[0].device == "film_16mm" and d.scenes[0].video_prompt == "A new prompt."

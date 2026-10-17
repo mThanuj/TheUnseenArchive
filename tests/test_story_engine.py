@@ -120,8 +120,11 @@ def test_real_mystery_uses_only_verified_claims(env):
         n["claim_ids"] = [1]
     d["narration"][3]["text"] = "Some believe burning dust explains it."
     d["narration"][3]["claim_ids"] = [4]
+    d["recorded_year"] = 1985          # period footage of a 1981 case, on a 1983+ camcorder
+    check = {"lines": [{"id": 1, "verdict": "supported"},
+                       {"id": 2, "verdict": "contradicted", "corrected": "The lights were first seen in 1981."}]}
     provider = FakeProvider({"ClaimList": [CLAIMS], "ConceptList": [CONCEPTS], "StoryDraft": [d],
-                             "Critique": [CRITIQUE_PASS]})
+                             "Critique": [CRITIQUE_PASS], "FactCheck": [check]})
     topic = Topic(id="example", wikipedia="Example lights", year=1981, kind="lights", sensitivity="low")
     engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=3,
                          fetch=fake_fetch, topics=[topic], log=lambda m: None)
@@ -132,6 +135,9 @@ def test_real_mystery_uses_only_verified_claims(env):
     assert record.problems == []
     assert "Sources: Wikipedia: Example lights" in record.ai_disclosure
     assert "quote-verified" in (out / "story.md").read_text(encoding="utf-8")
+    assert record.draft.narration[1].text == "The lights were first seen in 1981."   # fact-check correction
+    assert {"id": 2, "verdict": "contradicted", "original": "The corridor light was already flickering.",
+            "corrected": "The lights were first seen in 1981."} in record.fact_check
     # the topic is now used: the next pick avoids it unless nothing else is left
     assert engine.db.used_topics() == {"example"}
 

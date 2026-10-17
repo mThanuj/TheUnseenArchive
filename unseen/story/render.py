@@ -35,6 +35,7 @@ def to_markdown(r: StoryRecord) -> str:
         "",
         f"*{d.archive_entry}*",
         "",
+        f"- Recorded: {d.recorded_year}",
         f"- Category: {r.category} | target {r.target_seconds} s | scenes {len(d.scenes)} "
         f"({sum(s.duration_s for s in d.scenes):.0f} s)",
         f"- Logline: {d.logline}",
@@ -79,9 +80,15 @@ def to_markdown(r: StoryRecord) -> str:
         lines += ["## Concept ratings (/40)", ""]
         lines += [f"- {title}: {score}" for title, score in sorted(r.concept_ratings.items(), key=lambda x: -x[1])]
         lines.append("")
+    if r.fact_check:
+        lines += ["## Fact-check (independent model, line vs. cited claims)", ""]
+        for e in r.fact_check:
+            fixed = f" -> corrected to: {e['corrected']}" if e.get("corrected") else ""
+            lines.append(f"- line {e.get('id')}: {e.get('verdict')}{fixed}")
+        lines.append("")
     if r.claims:
         lines += ["## Claims (quote-verified against the source)", ""]
-        lines += [f"- [{c.id}] ({c.tag}) {c.text}  \n  > {c.quote}" for c in r.claims]
+        lines += [f"- [{c.id}] ({c.tag}{', visual' if c.visual else ''}) {c.text}  \n  > {c.quote}" for c in r.claims]
         lines.append("")
     if r.sources:
         lines += ["## Sources", ""]

@@ -7,7 +7,9 @@ llm:
   # faster than the laptop (~4 tok/s); their limits and data-use terms are the providers' own.
   # When two or more hosted providers are available, the critique uses a different model than the
   # writer (models grade their own work too kindly).
-  chain: [openrouter, gemini, groq, cerebras, ollama]
+  # openrouter's free models were rate-limited upstream on every call during testing, so it sits
+  # after gemini/groq as a backup and extra critic. groq_qwen spreads load (Groq limits are per model).
+  chain: [gemini, groq, groq_qwen, openrouter, cerebras, ollama]
   ollama:
     url: http://127.0.0.1:11434
     # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
@@ -37,6 +39,10 @@ llm:
       key_env: GROQ_API_KEY
       # gpt-oss is a reasoning model: hidden reasoning counts against max_tokens and cut scripts off
       extra_body: { reasoning_effort: low }
+    groq_qwen: # same GROQ_API_KEY, separate per-model rate limits
+      url: https://api.groq.com/openai/v1
+      model: qwen/qwen3.8-27b
+      key_env: GROQ_API_KEY
     cerebras: # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
       url: https://api.cerebras.ai/v1
       model: gpt-oss-120b
@@ -81,16 +87,17 @@ length: # varied on purpose; seconds of finished Reel
 # Ingredients are sampled per story (and cooled down for a few days) to force variety.
 ingredients:
   cooldown_stories: 5
-  device:
-    - { id: camcorder, desc: "early-2000s handheld camcorder" }
-    - { id: cctv, desc: "fixed high-angle security camera" }
-    - { id: night_vision, desc: "handheld night-vision camera" }
-    - { id: phone, desc: "smartphone held vertically" }
-    - { id: bodycam, desc: "chest-mounted body camera" }
-    - { id: dashcam, desc: "car dashboard camera" }
-    - { id: trail_cam, desc: "motion-triggered trail camera in the woods" }
-    - { id: webcam, desc: "laptop webcam in a dark room" }
-    - { id: film_8mm, desc: "silent 8mm home-movie film" }
+  device: # since = first year the device could plausibly record such footage (era checks)
+    - { id: camcorder, desc: "early-2000s handheld camcorder", since: 1983 }
+    - { id: cctv, desc: "fixed high-angle security camera", since: 1965 }
+    - { id: night_vision, desc: "handheld night-vision camera", since: 1990 }
+    - { id: phone, desc: "smartphone held vertically", since: 2007 }
+    - { id: bodycam, desc: "chest-mounted body camera", since: 2010 }
+    - { id: dashcam, desc: "car dashboard camera", since: 2008 }
+    - { id: trail_cam, desc: "motion-triggered trail camera in the woods", since: 1995 }
+    - { id: webcam, desc: "laptop webcam in a dark room", since: 1997 }
+    - { id: film_8mm, desc: "silent 8mm home-movie film", since: 1932 }
+    - { id: film_16mm, desc: "16mm documentary or news film camera", since: 1923 }
   location:
     - abandoned hospital wing
     - flooded basement
@@ -142,6 +149,13 @@ rules:
   min_critique_score: 7 # any dimension below this triggers one revision pass
   hook_max_words: 12
   narration_line_max_words: 22
+  # The Archivist states facts; these adjectives tell the viewer how to feel instead of showing it.
+  narration_banned_words: [eerie, eerily, mysterious, mysteriously, terrifying, chilling, creepy,
+                           sinister, ominous, spine, haunting, unsettling, spooky, macabre]
+  # Video models render text as gibberish (and hands writing as melting fingers): any of these, or a
+  # quoted string, in a video prompt triggers a scene rewrite.
+  video_prompt_text_risk: [written, writes, writing, handwritten, handwriting, reads, printout, printed,
+                           typed, label, labelled, labeled, headline, inscription, scrawled, spelled]
   banned_cliches:
     - it was all a dream
     - the narrator was dead all along

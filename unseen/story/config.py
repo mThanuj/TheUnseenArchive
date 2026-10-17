@@ -78,6 +78,7 @@ class LengthCfg(BaseModel):
 class Device(BaseModel):
     id: str
     desc: str
+    since: int = 1900
 
 
 class Ingredients(BaseModel):
@@ -98,6 +99,8 @@ class Rules(BaseModel):
     min_critique_score: int = 7
     hook_max_words: int
     narration_line_max_words: int
+    narration_banned_words: list[str] = []
+    video_prompt_text_risk: list[str] = []
     banned_cliches: list[str]
     video_prompt_banned_words: list[str]
     video_prompt_words: WordRange

@@ -7,18 +7,60 @@ saved to disk and SQLite.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Callable, Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 Category = Literal["fiction_horror", "psychological_mystery", "real_mystery"]
-Device = Literal["camcorder", "cctv", "night_vision", "phone", "bodycam", "dashcam", "trail_cam",
-                 "webcam", "film_8mm"]
-Delivery = Literal["calm", "hushed", "tense", "flat", "urgent"]
-Sound = Literal["room_tone", "drone", "hum", "electrical_buzz", "footsteps", "door", "knock", "impact",
-                "creak", "wind", "water_drip", "radio_static", "breathing", "whisper", "dropout",
-                "silence", "distant_voice", "machine"]
+DeviceName = Literal["camcorder", "cctv", "night_vision", "phone", "bodycam", "dashcam", "trail_cam",
+                     "webcam", "film_8mm", "film_16mm"]
+DeliveryName = Literal["calm", "hushed", "tense", "flat", "urgent"]
+SoundName = Literal["room_tone", "drone", "hum", "electrical_buzz", "footsteps", "door", "knock", "impact",
+                    "creak", "wind", "water_drip", "radio_static", "breathing", "whisper", "dropout",
+                    "silence", "distant_voice", "machine"]
 ClaimTag = Literal["fact", "disputed", "theory", "legend"]
+
+
+def _lenient(allowed_type, synonyms: dict[str, str], default: str) -> Callable:
+    """Map near-miss enum values from the LLM ("click", "precise", "smartphone") onto allowed ones,
+    so a single odd word doesn't force regenerating a whole script."""
+    allowed = set(get_args(allowed_type))
+
+    def coerce(value):
+        if not isinstance(value, str):
+            return value
+        key = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if key in allowed:
+            return key
+        return synonyms.get(key, default)
+
+    return coerce
+
+
+Device = Annotated[DeviceName, BeforeValidator(_lenient(DeviceName, {
+    "smartphone": "phone", "mobile": "phone", "cellphone": "phone", "cell_phone": "phone", "iphone": "phone",
+    "security_camera": "cctv", "surveillance": "cctv", "surveillance_camera": "cctv", "cctv_camera": "cctv",
+    "nightvision": "night_vision", "night_vision_camera": "night_vision", "infrared": "night_vision",
+    "body_camera": "bodycam", "body_cam": "bodycam", "dash_cam": "dashcam", "dashboard_camera": "dashcam",
+    "trailcam": "trail_cam", "trail_camera": "trail_cam", "game_camera": "trail_cam",
+    "web_cam": "webcam", "laptop": "webcam", "laptop_webcam": "webcam",
+    "8mm": "film_8mm", "super8": "film_8mm", "super_8": "film_8mm", "home_movie": "film_8mm",
+    "16mm": "film_16mm", "newsreel": "film_16mm", "film": "film_16mm",
+    "vhs": "camcorder", "hi8": "camcorder", "handycam": "camcorder", "video_camera": "camcorder",
+    "handheld": "camcorder"}, "camcorder"))]
+Delivery = Annotated[DeliveryName, BeforeValidator(_lenient(DeliveryName, {
+    "whisper": "hushed", "whispered": "hushed", "quiet": "hushed", "soft": "hushed", "low": "hushed",
+    "precise": "flat", "cold": "flat", "neutral": "flat", "clinical": "flat", "matter_of_fact": "flat",
+    "measured": "calm", "steady": "calm", "slow": "calm", "anxious": "tense", "nervous": "tense",
+    "uneasy": "tense", "fast": "urgent", "panicked": "urgent"}, "calm"))]
+Sound = Annotated[SoundName, BeforeValidator(_lenient(SoundName, {
+    "click": "machine", "beep": "machine", "whir": "machine", "motor": "machine", "static": "radio_static",
+    "hiss": "radio_static", "buzz": "electrical_buzz", "thud": "impact", "bang": "impact", "crash": "impact",
+    "crunch": "impact", "slam": "door", "door_slam": "door", "step": "footsteps", "steps": "footsteps",
+    "drip": "water_drip", "voice": "distant_voice", "voices": "distant_voice", "whispers": "whisper",
+    "breath": "breathing", "ambience": "room_tone", "ambient": "room_tone", "tone": "drone",
+    "rumble": "drone", "scrape": "creak", "squeak": "creak", "glitch": "dropout", "cut": "dropout"},
+    "room_tone"))]
 
 
 # ------------------------------------------------------------------ LLM outputs
@@ -58,6 +100,8 @@ class Claim(BaseModel):
     quote: str = Field(description="the exact words from the source text supporting it, copied verbatim, max 30 words")
     tag: ClaimTag = Field(description="fact = source states it as established; disputed = source notes "
                                       "disagreement; theory = proposed explanation; legend = folklore/unverified account")
+    visual: bool = Field(default=False, description="true if the claim describes what a place, object or "
+                                                    "person physically looked like")
 
 
 class ClaimList(BaseModel):
@@ -89,7 +133,8 @@ class Scene(BaseModel):
     lighting: str = Field(description="light sources and colour, max 12 words")
     continuity: str = Field(description="link to the previous shot, max 15 words")
     video_prompt: str = Field(description="final text-to-video prompt, one literal paragraph, 45-130 words")
-    osd: str = Field(default="", description="on-screen camera overlay, e.g. 'CAM 03  10-17-1998  02:13:44'")
+    osd: str = Field(default="", description="camera label only, e.g. 'CAM 03' or 'REC' (dates and times are "
+                                             "added automatically from recorded_year)")
     sfx: list[SfxCue] = Field(default_factory=list, max_length=3)
 
 
@@ -98,6 +143,8 @@ class StoryDraft(BaseModel):
     logline: str
     archive_entry: str = Field(description="catalogue line shown at the start, e.g. "
                                            "'ENTRY 0412 - Hi8 tape - recovered 2004, Ashby, Ohio'")
+    recorded_year: int = Field(ge=1890, le=2100, description="year the footage was recorded; every scene's "
+                                                             "device must already exist that year")
     narration: list[NarrationLine] = Field(min_length=3, max_length=24)
     scenes: list[Scene] = Field(min_length=3, max_length=12)
     ending_note: str = Field(description="one sentence: why the ending lands")
@@ -115,7 +162,7 @@ class Critique(BaseModel):
     visual_variety: int = Field(ge=1, le=10, description="distinct shots, and the anomaly visibly escalates on screen")
     brand_fit: int = Field(ge=1, le=10)
     issues: list[str] = Field(description="concrete problems with line/scene ids and how to fix them")
-    verdict: Literal["pass", "revise"]
+    verdict: Literal["pass", "revise"] = "revise"   # optional: the scores decide revisions anyway
 
     def scores(self) -> dict[str, int]:
         return {k: getattr(self, k) for k in ("hook", "escalation", "coherence", "originality",
@@ -130,6 +177,29 @@ class LineFix(BaseModel):
 
 class LineFixes(BaseModel):
     lines: list[LineFix]
+
+
+class SceneFix(BaseModel):
+    id: int = Field(description="scene id")
+    device: Device = Field(description="a device that existed in the recorded year")
+    video_prompt: str = Field(description="rewritten 45-130 word prompt with no readable text")
+
+
+class SceneFixes(BaseModel):
+    scenes: list[SceneFix]
+
+
+class LineVerdict(BaseModel):
+    id: int = Field(description="narration line id")
+    verdict: Literal["supported", "atmospheric", "unsupported", "contradicted"] = Field(
+        description="supported: says only what its cited claims say; atmospheric: no factual assertion; "
+                    "unsupported: adds facts not in the claims; contradicted: conflicts with a claim")
+    corrected: str = Field(default="", description="for unsupported/contradicted: the line rewritten to say "
+                                                   "only what the cited claims support, max 22 words")
+
+
+class FactCheck(BaseModel):
+    lines: list[LineVerdict]
 
 
 class SceneEdit(BaseModel):
@@ -179,5 +249,6 @@ class StoryRecord(BaseModel):
     problems: list[str] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
+    fact_check: list[dict] = Field(default_factory=list)
     llm: list[dict] = Field(default_factory=list)
     ai_disclosure: str = ""

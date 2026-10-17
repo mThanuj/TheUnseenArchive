@@ -11,8 +11,12 @@ from __future__ import annotations
 import re
 
 from .config import StoryConfig
-from .models import Claim, LineFixes, StoryDraft, StoryPatch
-from .validate import banned_in, first_person_slip, sanitize_video_prompt, speech_seconds, words
+from .models import Claim, LineFixes, SceneFixes, StoryDraft, StoryPatch
+from .validate import (banned_in, first_person_slip, readable_text_risk, sanitize_video_prompt,
+                       speech_seconds, words)
+
+OSD_DATE_TIME = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?|"
+                           r"\b(?:19|20)\d{2}\b")
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -105,8 +109,47 @@ def fit_video_prompts(d: StoryDraft, cfg: StoryConfig) -> list[str]:
     return fixes
 
 
+def clean_osd(d: StoryDraft) -> list[str]:
+    """Overlay keeps only the camera label; consistent dates/times are rendered later from recorded_year."""
+    fixes = []
+    for s in d.scenes:
+        label = re.sub(r"\s{2,}", "  ", OSD_DATE_TIME.sub("", s.osd)).strip(" -|")
+        if label != s.osd:
+            fixes.append(f"scene {s.id} osd '{s.osd}' -> '{label}'")
+            s.osd = label
+    return fixes
+
+
 def auto_fix(d: StoryDraft, cfg: StoryConfig, target: float) -> list[str]:
-    return place_lines(d) + fit_durations(d, cfg, target) + fit_video_prompts(d, cfg)
+    return place_lines(d) + fit_durations(d, cfg, target) + fit_video_prompts(d, cfg) + clean_osd(d)
+
+
+def scene_issues(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int | None) -> dict[int, str]:
+    """Scenes whose device or video prompt must be rewritten (anachronism, readable text)."""
+    issues: dict[int, list[str]] = {}
+    since = {dev.id: dev.since for dev in cfg.ingredients.device}
+    for s in d.scenes:
+        if since.get(s.device, 1900) > d.recorded_year:
+            issues.setdefault(s.id, []).append(
+                f"a {s.device} did not exist in {d.recorded_year}; use a device available then")
+        text = readable_text_risk(s.video_prompt, cfg.rules.video_prompt_text_risk)
+        if text:
+            issues.setdefault(s.id, []).append(f"remove readable text {text}; show objects without legible writing")
+    return {i: "; ".join(v) for i, v in issues.items()}
+
+
+def apply_scene_fixes(d: StoryDraft, fixes: SceneFixes, wanted: set[int]) -> list[str]:
+    by_id = {s.id: s for s in d.scenes}
+    changed = []
+    for f in fixes.scenes:
+        s = by_id.get(f.id)
+        if s is None or f.id not in wanted:
+            continue
+        s.device = f.device
+        if f.video_prompt.strip():
+            s.video_prompt = f.video_prompt.strip()
+        changed.append(f"scene {f.id} rewritten")
+    return changed
 
 
 def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
@@ -125,6 +168,9 @@ def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
             add(n.id, f"at most {r.narration_line_max_words} words")
         if first_person_slip(n.text):
             add(n.id, "the Archivist narrates in the third person: no I/me/my (quote a log line if needed)")
+        told = banned_in(n.text, r.narration_banned_words)
+        if told:
+            add(n.id, f"remove {told}: state concrete facts, don't tell the viewer how to feel")
         for c in r.banned_cliches:
             if c.lower() in n.text.lower():
                 add(n.id, f"remove the cliche '{c}'")
