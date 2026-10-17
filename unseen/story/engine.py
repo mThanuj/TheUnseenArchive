@@ -1,5 +1,9 @@
-"""The story pipeline: category -> (research) -> concepts -> novelty pick -> script -> critique ->
-(revise) -> checks -> files + SQLite.
+"""The story pipeline: category -> (research) -> concepts -> novelty pick -> script -> polish ->
+critique -> (patch + polish) -> checks -> files + SQLite.
+
+"Polish" fixes timing/placement/prompt problems deterministically and asks the model to rewrite
+only the narration lines that break a rule; the editor's revision is applied as a small patch.
+Neither regenerates the whole script (on a CPU that costs 10+ minutes per attempt).
 
 Real mysteries are grounded: Wikipedia text is fetched, the model extracts claims with verbatim
 quotes, quotes that don't occur in the source are rejected, and the script may only use the
@@ -21,12 +25,15 @@ import numpy as np
 from ..llm.base import LLMError, generate
 from ..state.db import StateDB
 from .config import LLMCfg, StoryConfig, Topic, load_story_config, load_topics
-from .models import Claim, ClaimList, Concept, ConceptList, Critique, Source, StoryDraft, StoryRecord
+from .models import (Claim, ClaimList, Concept, ConceptList, Critique, LineFixes, Source, StoryDraft,
+                     StoryPatch, StoryRecord)
 from .novelty import Embedder, FastEmbedder, concept_text, max_similarity
-from .prompts import claims_prompt, concepts_prompt, critique_prompt, revise_prompt, script_prompt, system_prompt
+from .prompts import (claims_prompt, concepts_prompt, critique_prompt, line_repair_prompt, patch_prompt,
+                      script_prompt, system_prompt)
 from .render import save_story
+from .repair import apply_line_fixes, apply_patch, auto_fix, line_issues
 from .research import ResearchError, fetch_article, trim_source
-from .validate import banned_in, sanitize_video_prompt, validate_story, verify_claims
+from .validate import validate_story, verify_claims
 
 Log = Callable[[str], None]
 
@@ -59,6 +66,8 @@ class StoryEngine:
         self.cfg = cfg or load_story_config()
         self.topics = topics if topics is not None else load_topics()
         self.provider = provider or make_provider(self.cfg.llm, provider_name)
+        if hasattr(self.provider, "log"):
+            self.provider.log = log   # streaming progress goes to the same log
         self.db = db or StateDB()
         self.log = log
         self.rng = random.Random(seed)
@@ -176,6 +185,26 @@ class StoryEngine:
         self.log("  concepts: " + "; ".join(f"'{concepts[i].title}' sim={sims[i]:.2f}" for i in order))
         return concepts[best], round(sims[best], 3), vecs[best], [concepts[i] for i in order[1:]]
 
+    def polish(self, draft: StoryDraft, target: int, category: str, claims: list[Claim] | None,
+               rounds: int = 2) -> None:
+        """Deterministic fixes, then LLM rewrites of only the offending narration lines."""
+        for _ in range(rounds):
+            fixes = auto_fix(draft, self.cfg, target)
+            if fixes:
+                self.log("  auto-fixed: " + "; ".join(fixes))
+            issues = line_issues(draft, self.cfg, target, category, claims)
+            if not issues:
+                return
+            self.log(f"  rewriting {len(issues)} line(s): " + "; ".join(f"{i}: {w}" for i, w in sorted(issues.items())))
+            try:
+                fixes_obj, _ = self._gen(LineFixes, name="repair", temperature=0.5, max_tokens=1200,
+                                         user=line_repair_prompt(self.cfg, draft, issues, category, claims))
+            except LLMError as exc:
+                self.log(f"  line repair failed: {exc}")
+                return
+            apply_line_fixes(draft, fixes_obj, set(issues), category)
+        auto_fix(draft, self.cfg, target)
+
     # --------------------------------------------------------------- pipeline
     def new_story(self, category: str | None = None, topic_id: str | None = None,
                   target_seconds: int | None = None) -> tuple[StoryRecord, Path]:
@@ -212,9 +241,9 @@ class StoryEngine:
 
         devices = {d.id: d.desc for d in self.cfg.ingredients.device}
         base = script_prompt(self.cfg, category, target, concept, ingredients, devices, claims)
-        check = lambda d: validate_story(d, self.cfg, target, category, claims)  # noqa: E731
-        draft, problems = self._gen(StoryDraft, user=base, name="script", check=check,
-                                    temperature=self.cfg.llm.temperature.script, max_tokens=6000)
+        draft, _ = self._gen(StoryDraft, user=base, name="script",
+                             temperature=self.cfg.llm.temperature.script, max_tokens=5000)
+        self.polish(draft, target, category, claims)
 
         critique, revised = None, False
         try:
@@ -224,17 +253,17 @@ class StoryEngine:
             self.log(f"  critique skipped: {exc}")
         if critique and (critique.verdict == "revise"
                          or min(critique.scores().values()) < self.cfg.rules.min_critique_score):
-            new, new_problems = self._gen(StoryDraft, user=revise_prompt(base, draft, critique), name="revise",
-                                          check=check, temperature=self.cfg.llm.temperature.script,
-                                          max_tokens=6000)
-            if len(new_problems) <= len(problems):
-                draft, problems, revised = new, new_problems, True
+            try:
+                patch, _ = self._gen(StoryPatch, name="revise", temperature=self.cfg.llm.temperature.script,
+                                     max_tokens=2500, user=patch_prompt(self.cfg, draft, critique, category, claims))
+                changed = apply_patch(draft, patch, category)
+                self.log(f"  revision applied: {', '.join(changed) or 'no changes'}")
+                revised = bool(changed)
+                self.polish(draft, target, category, claims)
+            except LLMError as exc:
+                self.log(f"  revision skipped: {exc}")
 
-        banned = self.cfg.rules.video_prompt_banned_words
-        for s in draft.scenes:
-            if banned_in(s.video_prompt, banned):
-                s.video_prompt = sanitize_video_prompt(s.video_prompt, banned)
-        problems = check(draft)
+        problems = validate_story(draft, self.cfg, target, category, claims)
 
         created = datetime.now()
         story_id = f"{created:%Y%m%d-%H%M%S}-{slugify(draft.title)}"

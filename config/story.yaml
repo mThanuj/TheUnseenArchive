@@ -6,7 +6,10 @@ llm:
     url: http://127.0.0.1:11434
     # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
     model: hf.co/google/gemma-4-12B-it-qat-q4_0-gguf
-    num_ctx: 16384                  # revise step carries the draft + critique + field guide
+    # 8k is enough now that repairs/revisions are small targeted calls; a smaller context leaves
+    # more of the 4 GB GPU for model layers (faster). Speed tip (optional, then restart Ollama):
+    #   setx OLLAMA_FLASH_ATTENTION 1   and   setx OLLAMA_KV_CACHE_TYPE q8_0
+    num_ctx: 8192
     # Gemma 4 can "think" before answering; left on, it spends the token budget on hidden reasoning
     # and returns empty content. Ollama's `think` accepts false or a level (low/medium/high/max).
     think: false

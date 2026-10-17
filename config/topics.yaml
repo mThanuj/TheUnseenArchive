@@ -11,16 +11,14 @@ topics:
   - {id: flannan_isles, wikipedia: "Flannan Isles Lighthouse", year: 1900, kind: disappearance, sensitivity: medium}
   - {id: carroll_deering, wikipedia: "Carroll A. Deering", year: 1921, kind: ghost ship, sensitivity: medium}
   - {id: ss_baychimo, wikipedia: "SS Baychimo", year: 1931, kind: ghost ship, sensitivity: low}
-  - {id: max_headroom, wikipedia: "Max Headroom broadcast signal intrusion", year: 1987, kind: broadcast intrusion, sensitivity: low}
+  - {id: max_headroom, wikipedia: "Max Headroom signal hijackings", year: 1987, kind: broadcast intrusion, sensitivity: low}
   - {id: uvb76, wikipedia: "UVB-76", year: 1976, kind: radio signal, sensitivity: low}
   - {id: wow_signal, wikipedia: "Wow! signal", year: 1977, kind: radio signal, sensitivity: low}
-  - {id: taos_hum, wikipedia: "Taos Hum", year: 1991, kind: sound phenomenon, sensitivity: low}
   - {id: the_hum, wikipedia: "The Hum", year: 1970, kind: sound phenomenon, sensitivity: low}
   - {id: hessdalen, wikipedia: "Hessdalen lights", year: 1981, kind: light phenomenon, sensitivity: low}
   - {id: marfa_lights, wikipedia: "Marfa lights", year: 1883, kind: light phenomenon, sensitivity: low}
   - {id: tunguska, wikipedia: "Tunguska event", year: 1908, kind: explosion, sensitivity: low}
   - {id: dancing_plague, wikipedia: "Dancing plague of 1518", year: 1518, kind: mass behaviour, sensitivity: low}
-  - {id: oakville_blobs, wikipedia: "Oakville blobs", year: 1994, kind: unexplained substance, sensitivity: low}
   - {id: kentucky_meat, wikipedia: "Kentucky meat shower", year: 1876, kind: unexplained fall, sensitivity: low}
   - {id: toynbee_tiles, wikipedia: "Toynbee tiles", year: 1980, kind: anonymous messages, sensitivity: low}
   - {id: voynich, wikipedia: "Voynich manuscript", year: 1404, kind: artifact, sensitivity: low}

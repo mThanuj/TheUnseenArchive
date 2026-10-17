@@ -108,6 +108,37 @@ def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique) -> st
             + "\n\nWrite the improved, complete script. Keep what works; fix every issue.")
 
 
+def patch_prompt(cfg: StoryConfig, draft: StoryDraft, critique: Critique, category: str,
+                 claims: list[Claim] | None) -> str:
+    r = cfg.rules
+    parts = [f"Here is a Reel script ({CATEGORY_BRIEF[category]}):\n{draft.model_dump_json()}",
+             f"The editor's critique (scores {critique.scores()}):\n- " + "\n- ".join(critique.issues),
+             "Fix every issue with targeted edits only: rewrite narration lines by id and/or edit scene "
+             "fields by id. Do not add, remove or renumber lines or scenes. Leave fields empty to keep them. "
+             f"Narration lines max {r.narration_line_max_words} words (the first line max {r.hook_max_words}). "
+             f"Video prompts follow the same rules as before ({r.video_prompt_words.min}-"
+             f"{r.video_prompt_words.max} words, literal, chronological, visible motion, no "
+             f"{', '.join(r.video_prompt_banned_words[:8])}...)."]
+    if category == "real_mystery":
+        parts.append("Use only these claims; cite claim_ids on factual lines; hedge theory/legend/disputed "
+                     "claims:\n" + _claims_block(claims or []))
+    return "\n\n".join(parts)
+
+
+def line_repair_prompt(cfg: StoryConfig, draft: StoryDraft, issues: dict[int, str], category: str,
+                       claims: list[Claim] | None) -> str:
+    current = "\n".join(f"[{n.id}] {n.text}" for n in draft.narration)
+    todo = "\n".join(f"[{i}] {next(n.text for n in draft.narration if n.id == i)}\n    problem: {why}"
+                     for i, why in sorted(issues.items()))
+    parts = [f"Story: {draft.title} - {draft.logline}\nFull narration for context:\n{current}",
+             f"Rewrite ONLY these lines to fix their problems, keeping the meaning and the Archivist's voice "
+             f"(max {cfg.rules.narration_line_max_words} words per line):\n{todo}",
+             "Return one entry per listed line id."]
+    if category == "real_mystery":
+        parts.append("Claims you may cite (claim_ids); never add facts beyond them:\n" + _claims_block(claims or []))
+    return "\n\n".join(parts)
+
+
 def claims_prompt(topic: Topic, source_text: str) -> str:
     return (f"Below is source text about '{topic.wikipedia}'. Extract 8-14 atomic claims that a short, "
             f"eerie but faithful retelling would need: what happened, when, where, what was found, what "

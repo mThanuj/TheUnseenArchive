@@ -53,16 +53,33 @@ def test_fiction_pipeline_writes_files_and_db(env):
     assert "AI-generated" in record.ai_disclosure
 
 
-def test_critique_triggers_one_revision(env):
+def test_critique_triggers_one_patch_revision(env):
     revise = dict(CRITIQUE_PASS, ending=5, verdict="revise", issues=["scene 7: ending is flat"])
-    improved = draft_dict(ending_note="Sharper ending.")
-    provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict(), improved],
-                             "Critique": [revise]})
+    patch = {"narration": [{"id": 6, "text": "The camera in the footage is still recording.", "claim_ids": []}],
+             "scenes": [{"id": 7, "video_prompt": ""}], "ending_note": "Sharper ending."}
+    provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict()],
+                             "Critique": [revise], "StoryPatch": [patch]})
     engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=2,
                          log=lambda m: None)
     record, _ = engine.new_story(category="psychological_mystery", target_seconds=30)
     assert record.revised and record.draft.ending_note == "Sharper ending."
-    assert provider.calls.count("StoryDraft") == 2
+    assert record.draft.narration[5].text == "The camera in the footage is still recording."
+    assert record.draft.scenes[6].video_prompt            # empty edit keeps the original
+    assert provider.calls.count("StoryDraft") == 1 and "StoryPatch" in provider.calls
+
+
+def test_rule_breaking_lines_are_rewritten_not_the_whole_script(env):
+    d = draft_dict()
+    d["narration"][0]["text"] = "This hook line is far far too long to be a hook for anyone at all"
+    fixes = {"lines": [{"id": 1, "text": "The tape starts mid-step.", "claim_ids": []}]}
+    provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [d], "LineFixes": [fixes],
+                             "Critique": [CRITIQUE_PASS]})
+    engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=4,
+                         log=lambda m: None)
+    record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
+    assert record.draft.narration[0].text == "The tape starts mid-step."
+    assert record.problems == []
+    assert provider.calls == ["ConceptList", "StoryDraft", "LineFixes", "Critique"]
 
 
 def test_real_mystery_uses_only_verified_claims(env):

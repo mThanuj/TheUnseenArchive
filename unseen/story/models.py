@@ -66,14 +66,14 @@ class Scene(BaseModel):
     narration_ids: list[int] = Field(description="narration line ids spoken during this scene (may be empty)")
     duration_s: float = Field(ge=2.0, le=5.0)
     device: Device
-    visual: str = Field(description="what is in frame")
-    motion: str = Field(description="what moves or changes during the shot")
-    camera: str = Field(description="perspective and camera movement (or 'fixed')")
-    lighting: str
-    continuity: str = Field(description="how this shot connects to the previous one")
+    visual: str = Field(description="what is in frame, max 20 words")
+    motion: str = Field(description="what moves or changes during the shot, max 15 words")
+    camera: str = Field(description="perspective and camera movement (or 'fixed'), max 12 words")
+    lighting: str = Field(description="light sources and colour, max 12 words")
+    continuity: str = Field(description="link to the previous shot, max 15 words")
     video_prompt: str = Field(description="final text-to-video prompt, one literal paragraph, 45-130 words")
     osd: str = Field(default="", description="on-screen camera overlay, e.g. 'CAM 03  10-17-1998  02:13:44'")
-    sfx: list[SfxCue] = Field(default_factory=list)
+    sfx: list[SfxCue] = Field(default_factory=list, max_length=3)
 
 
 class StoryDraft(BaseModel):
@@ -102,6 +102,32 @@ class Critique(BaseModel):
     def scores(self) -> dict[str, int]:
         return {k: getattr(self, k) for k in ("hook", "escalation", "coherence", "originality",
                                               "ending", "visual_feasibility", "brand_fit")}
+
+
+class LineFix(BaseModel):
+    id: int = Field(description="narration line id")
+    text: str = Field(description="the rewritten line, spoken words only")
+    claim_ids: list[int] = Field(default_factory=list, description="real mysteries: supporting claim ids")
+
+
+class LineFixes(BaseModel):
+    lines: list[LineFix]
+
+
+class SceneEdit(BaseModel):
+    id: int = Field(description="scene id")
+    visual: str = Field(default="", description="new value, or empty to keep")
+    motion: str = Field(default="", description="new value, or empty to keep")
+    camera: str = Field(default="", description="new value, or empty to keep")
+    lighting: str = Field(default="", description="new value, or empty to keep")
+    video_prompt: str = Field(default="", description="new 45-130 word prompt, or empty to keep")
+
+
+class StoryPatch(BaseModel):
+    """A revision as targeted edits: much cheaper than regenerating the whole script."""
+    narration: list[LineFix] = Field(default_factory=list, description="rewritten narration lines (by id)")
+    scenes: list[SceneEdit] = Field(default_factory=list, description="edited scenes (by id)")
+    ending_note: str = Field(default="", description="new ending note, or empty to keep")
 
 
 # ------------------------------------------------------------------ saved record

@@ -7,6 +7,7 @@ story stage is done (so video/audio stages get the RAM back), and `/api/pull` fo
 from __future__ import annotations
 
 import json
+import time
 from typing import Callable
 
 import httpx
@@ -31,6 +32,7 @@ class OllamaProvider:
         self.num_ctx = num_ctx
         self.timeout_s = timeout_s
         self.think = think
+        self.log: Log = print
 
     def version(self) -> str:
         try:
@@ -76,24 +78,44 @@ class OllamaProvider:
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "format": schema,
-            "stream": False,
+            "stream": True,   # streamed so long CPU generations show progress
             "think": self.think,
             "keep_alive": "10m",
             "options": {"temperature": temperature, "num_ctx": self.num_ctx, "num_predict": max_tokens},
         }
+        parts: list[str] = []
+        thinking = 0
+        final: dict = {}
+        t0 = last = time.monotonic()
         try:
-            r = httpx.post(f"{self.url}/api/chat", json=body, timeout=self.timeout_s)
+            with httpx.stream("POST", f"{self.url}/api/chat", json=body,
+                              timeout=httpx.Timeout(self.timeout_s, connect=10)) as r:
+                if r.status_code != 200:
+                    raise LLMError(f"Ollama returned {r.status_code}: {r.read()[:800]!r}")
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    if chunk.get("error"):
+                        raise LLMError(f"Ollama error: {chunk['error']}")
+                    msg = chunk.get("message") or {}
+                    parts.append(msg.get("content") or "")
+                    thinking += len(msg.get("thinking") or "")
+                    now = time.monotonic()
+                    if now - last >= 30:
+                        n = len(parts)
+                        self.log(f"    ... {n} tokens so far ({n / (now - t0):.1f} tok/s incl. prompt processing)")
+                        last = now
+                    if chunk.get("done"):
+                        final = chunk
+                        break
         except httpx.HTTPError as exc:
             raise LLMError(f"Ollama request failed: {exc!r}") from None
-        if r.status_code != 200:
-            raise LLMError(f"Ollama returned {r.status_code}: {r.text[:800]}")
-        d = r.json()
-        msg = d.get("message") or {}
-        usage = {"prompt_tokens": d.get("prompt_eval_count"), "output_tokens": d.get("eval_count"),
-                 "eval_s": (d.get("eval_duration") or 0) / 1e9,
-                 "prompt_s": (d.get("prompt_eval_duration") or 0) / 1e9,
-                 "done_reason": d.get("done_reason"), "thinking_chars": len(msg.get("thinking") or "")}
-        return msg.get("content", ""), usage
+        usage = {"prompt_tokens": final.get("prompt_eval_count"), "output_tokens": final.get("eval_count"),
+                 "eval_s": (final.get("eval_duration") or 0) / 1e9,
+                 "prompt_s": (final.get("prompt_eval_duration") or 0) / 1e9,
+                 "done_reason": final.get("done_reason"), "thinking_chars": thinking}
+        return "".join(parts), usage
 
     def unload(self) -> None:
         """Free RAM/VRAM: an empty request with keep_alive=0 unloads the model."""
