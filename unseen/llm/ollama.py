@@ -73,7 +73,7 @@ class OllamaProvider:
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:
         # `format` constrains the JSON shape; the field guide tells the model what each field means.
-        user = f"{user}\n\nJSON fields to fill:\n{schema_guide(schema)}"
+        user = f"{user}\n\nJSON fields to fill:\n{schema_guide(schema)}\n\nWrite compact JSON without indentation."
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],

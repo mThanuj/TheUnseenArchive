@@ -1,7 +1,11 @@
 # Story engine (Milestone 2). Everything creative that should be tunable without code changes.
 
 llm:
-  provider: ollama                  # ollama (local, default) | gemini (optional hosted free tier)
+  # Providers are tried in this order. Any provider without its API key in .env is skipped, so with
+  # no keys everything runs on the local Ollama model. If one fails mid-story (free quota, outage),
+  # the next takes over. `--provider NAME` forces a single provider. Hosted free tiers are much
+  # faster than the laptop (~4 tok/s); their limits and data-use terms are the providers' own.
+  chain: [gemini, groq, cerebras, ollama]
   ollama:
     url: http://127.0.0.1:11434
     # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
@@ -14,15 +18,28 @@ llm:
     # and returns empty content. Ollama's `think` accepts false or a level (low/medium/high/max).
     think: false
     timeout_s: 2400                 # CPU generation of a full script can take several minutes
-  gemini:
+  gemini:                           # key: https://aistudio.google.com/apikey -> GEMINI_API_KEY
     url: https://generativelanguage.googleapis.com/v1beta
-    model: gemini-2.5-flash         # free-tier model name; check https://ai.google.dev/gemini-api/docs/models
+    model: gemini-2.5-flash         # check current names: uv run unseen llm-models --provider gemini
     timeout_s: 300
+  openai_compat:                    # OpenAI-compatible APIs; model names change, check with llm-models
+    groq:                           # key: https://console.groq.com/keys -> GROQ_API_KEY
+      url: https://api.groq.com/openai/v1
+      model: llama-3.3-70b-versatile
+      key_env: GROQ_API_KEY
+    cerebras:                       # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
+      url: https://api.cerebras.ai/v1
+      model: gpt-oss-120b
+      key_env: CEREBRAS_API_KEY
+    openrouter:                     # optional, not in the chain by default; ":free" models are rate-capped
+      url: https://openrouter.ai/api/v1
+      model: "meta-llama/llama-3.3-70b-instruct:free"
+      key_env: OPENROUTER_API_KEY
   temperature:
     concepts: 1.0
     script: 0.8
     critique: 0.2
-  max_retries: 2                    # re-ask with the validation errors when output is invalid
+  max_retries: 2                    # re-ask when the output is not valid JSON for the schema
 
 brand:
   name: The Unseen Archive

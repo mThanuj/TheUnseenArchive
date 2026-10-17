@@ -113,8 +113,9 @@ def patch_prompt(cfg: StoryConfig, draft: StoryDraft, critique: Critique, catego
     r = cfg.rules
     parts = [f"Here is a Reel script ({CATEGORY_BRIEF[category]}):\n{draft.model_dump_json()}",
              f"The editor's critique (scores {critique.scores()}):\n- " + "\n- ".join(critique.issues),
-             "Fix every issue with targeted edits only: rewrite narration lines by id and/or edit scene "
-             "fields by id. Do not add, remove or renumber lines or scenes. Leave fields empty to keep them. "
+             "Fix the issues with the FEWEST targeted edits: at most 5 narration lines and 4 scenes, "
+             "only those the issues name. Do not repeat unchanged lines or scenes. Do not add, remove or "
+             "renumber lines or scenes. Leave fields empty to keep them. "
              f"Narration lines max {r.narration_line_max_words} words (the first line max {r.hook_max_words}). "
              f"Video prompts follow the same rules as before ({r.video_prompt_words.min}-"
              f"{r.video_prompt_words.max} words, literal, chronological, visible motion, no "

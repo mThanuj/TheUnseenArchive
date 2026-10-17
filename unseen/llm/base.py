@@ -142,9 +142,11 @@ def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, 
         try:
             obj = model_cls.model_validate(json.loads(extract_json(raw)))
         except (ValueError, ValidationError) as exc:
-            detail = (f"{str(exc)[:800]} | output starts: {raw[:300]!r} | done_reason="
-                      f"{usage.get('done_reason')} thinking_chars={usage.get('thinking_chars')} "
-                      f"output_tokens={usage.get('output_tokens')}")
+            reason = usage.get("done_reason")
+            cut = " OUTPUT WAS CUT OFF AT THE TOKEN LIMIT;" if reason in ("length", "max_tokens", "MAX_TOKENS") else ""
+            detail = (f"done_reason={reason};{cut} output_tokens={usage.get('output_tokens')} "
+                      f"thinking_chars={usage.get('thinking_chars')} | {str(exc)[:600]} | "
+                      f"output starts: {raw[:200]!r}")
             log(f"  llm[{name}] invalid output: {detail[:400]}")
             if stats.attempts > max_retries:
                 if best:

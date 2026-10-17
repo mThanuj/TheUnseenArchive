@@ -125,8 +125,10 @@ class SceneEdit(BaseModel):
 
 class StoryPatch(BaseModel):
     """A revision as targeted edits: much cheaper than regenerating the whole script."""
-    narration: list[LineFix] = Field(default_factory=list, description="rewritten narration lines (by id)")
-    scenes: list[SceneEdit] = Field(default_factory=list, description="edited scenes (by id)")
+    narration: list[LineFix] = Field(default_factory=list, max_length=5,
+                                     description="only the narration lines that must change (max 5)")
+    scenes: list[SceneEdit] = Field(default_factory=list, max_length=4,
+                                    description="only the scenes that must change (max 4)")
     ending_note: str = Field(default="", description="new ending note, or empty to keep")
 
 

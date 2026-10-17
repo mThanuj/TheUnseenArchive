@@ -198,29 +198,58 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
     from .story.config import load_story_config
     from .story.engine import make_provider
     cfg = load_story_config()
-    provider = make_provider(cfg.llm, args.provider)
-    if provider.name == "ollama":
-        print(f"Ollama {provider.version()} at {provider.url}")
-        if provider.has_model():
-            print(f"Model present: {provider.model}")
-        else:
-            print(f"Pulling {provider.model} (~7 GB, one time) ...")
-            provider.pull()
+    names = [args.provider] if args.provider else cfg.llm.chain
+    from .llm.base import LLMError
 
     class SpeedTest(BaseModel):
         title: str
         lines: list[str]
 
-    print("Speed test: a 4-line structured micro-story ...")
-    obj, stats, _ = generate(provider, SpeedTest, system="You write eerie, restrained micro-fiction. Answer in JSON.",
-                             user="Write a 4-line micro-story: the last log entry of a lighthouse keeper.",
-                             name="speed-test", temperature=0.7, max_tokens=1000, max_retries=1)
-    print(f"\n{obj.title}\n  " + "\n  ".join(obj.lines))
-    print(f"\n{stats.output_tokens} tokens in {stats.seconds} s ({stats.tokens_per_s} tok/s incl. prompt "
-          f"processing and model load). A full story needs ~6-10k tokens across 3-4 calls.")
-    unload = getattr(provider, "unload", None)
-    if unload:
-        unload()
+    results = []
+    for name in names:
+        print(f"\n== {name}")
+        try:
+            provider = make_provider(cfg.llm, name)
+        except LLMError as exc:
+            print(f"  skipped: {exc}")
+            results.append(f"{name:10} skipped (no key)")
+            continue
+        try:
+            if provider.name == "ollama":
+                print(f"  Ollama {provider.version()} at {provider.url}")
+                if provider.has_model():
+                    print(f"  model present: {provider.model}")
+                else:
+                    print(f"  pulling {provider.model} (~7 GB, one time) ...")
+                    provider.pull()
+            obj, stats, _ = generate(provider, SpeedTest, name="speed-test", temperature=0.7, max_tokens=1000,
+                                     max_retries=1, system="You write eerie, restrained micro-fiction. Answer in JSON.",
+                                     user="Write a 4-line micro-story: the last log entry of a lighthouse keeper.")
+            print(f"  {obj.title}\n    " + "\n    ".join(obj.lines))
+            results.append(f"{name:10} {provider.model}: {stats.output_tokens} tokens in {stats.seconds} s "
+                           f"({stats.tokens_per_s} tok/s incl. latency)")
+        except LLMError as exc:
+            print(f"  FAILED: {exc}")
+            results.append(f"{name:10} FAILED: {str(exc)[:120]}")
+        finally:
+            unload = getattr(provider, "unload", None)
+            if unload:
+                unload()
+    print("\nSummary (story new uses the first working provider in this order):\n  " + "\n  ".join(results))
+    return 0
+
+
+def cmd_llm_models(args: argparse.Namespace) -> int:
+    from .story.config import load_story_config
+    from .story.engine import make_provider
+    provider = make_provider(load_story_config().llm, args.provider)
+    lister = getattr(provider, "list_models", None)
+    if lister is None:
+        print(f"{args.provider} has no model listing; for Ollama use `ollama list`.")
+        return 1
+    models = lister()
+    print(f"{len(models)} models available to your {args.provider} key:\n  " + "\n  ".join(models))
+    print(f"\nConfigured: {provider.model}  (change it in config/story.yaml)")
     return 0
 
 
@@ -391,9 +420,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_kaggle_fetch)
 
     # ---- Milestone 2: stories
-    p = sub.add_parser("llm-setup", help="check the LLM provider, pull the model, measure speed")
-    p.add_argument("--provider", choices=["ollama", "gemini"], help="default: config/story.yaml")
+    p = sub.add_parser("llm-setup", help="check each LLM provider in the chain, pull the local model, measure speed")
+    p.add_argument("--provider", help="only this provider (ollama, gemini, groq, cerebras, openrouter, ...)")
     p.set_defaults(func=cmd_llm_setup)
+
+    p = sub.add_parser("llm-models", help="list the models a hosted provider offers your API key")
+    p.add_argument("--provider", required=True, help="gemini, groq, cerebras, openrouter, ...")
+    p.set_defaults(func=cmd_llm_models)
 
     p = sub.add_parser("topics", help="check every real-mystery topic title against Wikipedia")
     p.set_defaults(func=cmd_topics)
@@ -404,7 +437,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--category", choices=["fiction_horror", "psychological_mystery", "real_mystery"])
     p.add_argument("--topic", help="real_mystery topic id from config/topics.yaml")
     p.add_argument("--seconds", type=int, help="target Reel length (default: varied)")
-    p.add_argument("--provider", choices=["ollama", "gemini"], help="default: config/story.yaml")
+    p.add_argument("--provider", help="force one provider (default: the chain in config/story.yaml)")
     p.add_argument("--seed", type=int, help="random seed for category/ingredient choices")
     p.set_defaults(func=cmd_story_new)
     p = ssub.add_parser("list", help="recent stories")

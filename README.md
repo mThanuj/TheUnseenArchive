@@ -50,8 +50,12 @@ uv run unseen story show <id>                    # same as runs\stories\<id>\sto
 uv run unseen story render <id> --kaggle         # renders every scene at 512x768x49 (preview) on Kaggle
 ```
 
-Optional: a free Gemini API key (`GEMINI_API_KEY` in `.env`) enables `--provider gemini` for
-comparison. Free-tier limits and data-use terms are Google's and may change.
+Optional but recommended: free API keys make story writing far faster than the laptop (~4 tok/s,
+15-30 min per story). Add any of `GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY` to `.env`;
+providers are tried in the order of `llm.chain` in `config/story.yaml` (keyless ones are skipped,
+the local model is the last fallback). `uv run unseen llm-setup` speed-tests each one and
+`uv run unseen llm-models --provider groq` lists valid model names. Free-tier limits and data-use
+terms are the providers' own.
 
 Outputs per story in `runs\stories\<id>\`: `story.md` (read this), `story.json` (full record),
 `prompts.json` (scene video prompts). State is kept in `state\unseen.db`.

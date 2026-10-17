@@ -27,10 +27,18 @@ class Temperatures(BaseModel):
     critique: float = 0.2
 
 
+class OpenAICompatCfg(BaseModel):
+    url: str
+    model: str
+    key_env: str
+    timeout_s: float = 300
+
+
 class LLMCfg(BaseModel):
-    provider: str = "ollama"
+    chain: list[str] = ["ollama"]
     ollama: OllamaCfg
     gemini: GeminiCfg
+    openai_compat: dict[str, OpenAICompatCfg] = {}
     temperature: Temperatures = Temperatures()
     max_retries: int = 2
 

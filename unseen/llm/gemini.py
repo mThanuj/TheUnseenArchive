@@ -29,12 +29,23 @@ class GeminiProvider:
         self.model = model
         self.timeout_s = timeout_s
 
+    def list_models(self) -> list[str]:
+        try:
+            r = httpx.get(f"{self.url}/models", headers={"x-goog-api-key": self._key},
+                          params={"pageSize": 200}, timeout=30)
+        except httpx.HTTPError as exc:
+            raise LLMError(f"gemini: {exc!r}") from None
+        if r.status_code != 200:
+            raise LLMError(f"gemini returned {r.status_code}: {r.text[:300]}")
+        return sorted(m["name"].removeprefix("models/") for m in r.json().get("models", [])
+                      if "generateContent" in m.get("supportedGenerationMethods", []))
+
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:
         body = {
             "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": f"{user}\n\nReturn JSON matching this JSON Schema:\n"
-                                                              f"{json.dumps(schema)}"}]}],
+            "contents": [{"role": "user", "parts": [{"text": f"{user}\n\nReturn one compact JSON object matching "
+                                                              f"this JSON Schema:\n{json.dumps(schema)}"}]}],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max(max_tokens, 8192),
                                  "responseMimeType": "application/json"},
         }

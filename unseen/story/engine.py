@@ -38,8 +38,7 @@ from .validate import validate_story, verify_claims
 Log = Callable[[str], None]
 
 
-def make_provider(cfg: LLMCfg, name: str | None = None):
-    name = name or cfg.provider
+def build_provider(cfg: LLMCfg, name: str):
     if name == "ollama":
         from ..llm.ollama import OllamaProvider
         return OllamaProvider(cfg.ollama.url, cfg.ollama.model, cfg.ollama.num_ctx, cfg.ollama.timeout_s,
@@ -47,7 +46,28 @@ def make_provider(cfg: LLMCfg, name: str | None = None):
     if name == "gemini":
         from ..llm.gemini import GeminiProvider
         return GeminiProvider(cfg.gemini.url, cfg.gemini.model, cfg.gemini.timeout_s)
-    raise ValueError(f"unknown LLM provider {name!r} (ollama | gemini)")
+    if name in cfg.openai_compat:
+        from ..llm.openai_compat import OpenAICompatProvider
+        c = cfg.openai_compat[name]
+        return OpenAICompatProvider(name, c.url, c.model, c.key_env, c.timeout_s)
+    known = ["ollama", "gemini", *cfg.openai_compat]
+    raise ValueError(f"unknown LLM provider {name!r}; configured: {known}")
+
+
+def make_provider(cfg: LLMCfg, name: str | None = None, log: Log = print):
+    """One named provider, or the configured chain minus providers without API keys."""
+    if name:
+        return build_provider(cfg, name)
+    from ..llm.fallback import FallbackProvider
+    providers = []
+    for n in cfg.chain:
+        try:
+            providers.append(build_provider(cfg, n))
+        except LLMError as exc:
+            log(f"  LLM provider {n} skipped: {exc}")
+    if len(providers) == 1:
+        return providers[0]
+    return FallbackProvider(providers, log)
 
 
 def slugify(text: str, n: int = 32) -> str:
@@ -65,7 +85,7 @@ class StoryEngine:
                  cfg: StoryConfig | None = None, topics: list[Topic] | None = None):
         self.cfg = cfg or load_story_config()
         self.topics = topics if topics is not None else load_topics()
-        self.provider = provider or make_provider(self.cfg.llm, provider_name)
+        self.provider = provider or make_provider(self.cfg.llm, provider_name, log)
         if hasattr(self.provider, "log"):
             self.provider.log = log   # streaming progress goes to the same log
         self.db = db or StateDB()
@@ -153,10 +173,12 @@ class StoryEngine:
         raise ResearchError("no topic could be researched")
 
     # ------------------------------------------------------------------ steps
-    def _gen(self, model_cls, *, user: str, name: str, temperature: float, max_tokens: int, check=None):
+    def _gen(self, model_cls, *, user: str, name: str, temperature: float, max_tokens: int, check=None,
+             retries: int | None = None):
         obj, stats, problems = generate(
             self.provider, model_cls, system=system_prompt(self.cfg), user=user, name=name,
-            temperature=temperature, max_tokens=max_tokens, max_retries=self.cfg.llm.max_retries,
+            temperature=temperature, max_tokens=max_tokens,
+            max_retries=self.cfg.llm.max_retries if retries is None else retries,
             check=check, log=self.log)
         self.stats.append(stats.as_dict())
         return obj, problems
@@ -253,9 +275,10 @@ class StoryEngine:
             self.log(f"  critique skipped: {exc}")
         if critique and (critique.verdict == "revise"
                          or min(critique.scores().values()) < self.cfg.rules.min_critique_score):
-            try:
+            try:   # optional step: one attempt only, a failure keeps the unrevised (already valid) draft
                 patch, _ = self._gen(StoryPatch, name="revise", temperature=self.cfg.llm.temperature.script,
-                                     max_tokens=2500, user=patch_prompt(self.cfg, draft, critique, category, claims))
+                                     max_tokens=2000, retries=0,
+                                     user=patch_prompt(self.cfg, draft, critique, category, claims))
                 changed = apply_patch(draft, patch, category)
                 self.log(f"  revision applied: {', '.join(changed) or 'no changes'}")
                 revised = bool(changed)
