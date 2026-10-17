@@ -171,12 +171,17 @@ def cmd_kaggle_bench(args: argparse.Namespace) -> int:
 def cmd_kaggle_status(args: argparse.Namespace) -> int:
     from .cloud import kaggle as kg
     kg.check_credentials()
-    state, message = kg.status()
-    print(f"{kg.kernel_ref()}: {state}{' - ' + message if message else ''}")
     try:
-        print("\nWeekly accelerator quota:\n" + kg.quota())
+        print("Weekly accelerator quota (this also proves your token works):\n" + kg.quota())
     except kg.KaggleError as exc:
-        print(f"(quota unavailable: {exc})")
+        print(f"Your Kaggle credentials were rejected or the API is unreachable:\n  {exc}\n"
+              f"Check KAGGLE_API_TOKEN in .env (kaggle.com > Settings > API > Create New Token).")
+        return 1
+    state, message = kg.status()
+    print(f"\nRunner {kg.kernel_ref()}: {state}{' - ' + message if message else ''}")
+    if state == "none":
+        print(f"If you have already run kaggle-bench, check that KAGGLE_USERNAME ({kg.username()}) "
+              f"matches the account the token belongs to.")
     return 0
 
 

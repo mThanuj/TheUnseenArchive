@@ -87,8 +87,9 @@ def kernel_ref() -> str:
 
 
 def _kaggle(args: list[str], timeout: int = 600) -> str:
-    proc = subprocess.run([kaggle_exe(), *args], capture_output=True, text=True, timeout=timeout,
-                          env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    proc = subprocess.run([kaggle_exe(), *args], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=timeout,
+                          env=dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1"))
     out = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode != 0:
         raise KaggleError(f"`kaggle {' '.join(args)}` failed (exit {proc.returncode}): {out.strip()[-1500:]}")
@@ -167,12 +168,17 @@ def write_bundle(job: KaggleJob, accelerator: str, folder: Path) -> Path:
 
 # ------------------------------------------------------------------ actions
 
+NO_KERNEL_MARKERS = ("404", "not found", "kernels.get", "permission")
+
+
 def status() -> tuple[str, str]:
     try:
         return parse_status(_kaggle(["kernels", "status", kernel_ref()], timeout=120))
     except KaggleError as exc:
-        if "404" in str(exc) or "not found" in str(exc).lower():
-            return "none", "kernel does not exist yet (first push creates it)"
+        # Kaggle answers a missing *private* kernel with "Permission 'kernels.get' was denied"
+        # (the CLI maps both 401 and 403 to that text), not with 404.
+        if any(m in str(exc).lower() for m in NO_KERNEL_MARKERS):
+            return "none", "no runner notebook yet (the first kaggle-bench creates it)"
         raise
 
 

@@ -14,6 +14,19 @@ def test_parse_status_variants():
     assert state == "error" and msg == "OOM in cell"
 
 
+def test_missing_private_kernel_reads_as_none(monkeypatch):
+    # Real message from the first `kaggle-status` on the target machine (kernel not created yet)
+    msg = ("`kaggle kernels status u/unseen-archive-runner` failed (exit 1): Cannot access kernel "
+           "'u/unseen-archive-runner' (Permission 'kernels.get' was denied). The most likely cause "
+           "is a wrong kernel slug.")
+
+    def fake(args, timeout=600):
+        raise kg.KaggleError(msg)
+    monkeypatch.setenv("KAGGLE_USERNAME", "u")
+    monkeypatch.setattr(kg, "_kaggle", fake)
+    assert kg.status()[0] == "none"
+
+
 def test_https_repo_url():
     assert kg.https_repo_url("git@github.com:mThanuj/TheUnseenArchive.git") == \
         "https://github.com/mThanuj/TheUnseenArchive.git"
