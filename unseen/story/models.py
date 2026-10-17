@@ -35,6 +35,23 @@ class ConceptList(BaseModel):
     concepts: list[Concept] = Field(min_length=3, max_length=6)
 
 
+class ConceptRating(BaseModel):
+    index: int = Field(description="concept number as listed (1-based)")
+    hook: int = Field(ge=1, le=10, description="would a scrolling viewer stop within one second")
+    dread: int = Field(ge=1, le=10, description="does it get under the skin")
+    originality: int = Field(ge=1, le=10)
+    visual_potential: int = Field(ge=1, le=10, description="can short AI video clips show the anomaly clearly")
+    note: str = Field(default="", description="max 20 words")
+
+    @property
+    def total(self) -> int:
+        return self.hook + self.dread + self.originality + self.visual_potential
+
+
+class ConceptRatings(BaseModel):
+    ratings: list[ConceptRating]
+
+
 class Claim(BaseModel):
     id: int
     text: str = Field(description="one atomic statement paraphrased from the source")
@@ -156,6 +173,8 @@ class StoryRecord(BaseModel):
     novelty_max_similarity: float | None = None
     draft: StoryDraft
     critique: Critique | None = None
+    critique_history: list[dict] = Field(default_factory=list)
+    concept_ratings: dict[str, int] = Field(default_factory=dict)
     revised: bool = False
     problems: list[str] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)

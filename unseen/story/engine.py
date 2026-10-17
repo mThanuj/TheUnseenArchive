@@ -25,11 +25,11 @@ import numpy as np
 from ..llm.base import LLMError, generate
 from ..state.db import StateDB
 from .config import LLMCfg, StoryConfig, Topic, load_story_config, load_topics
-from .models import (Claim, ClaimList, Concept, ConceptList, Critique, LineFixes, Source, StoryDraft,
-                     StoryPatch, StoryRecord)
+from .models import (Claim, ClaimList, Concept, ConceptList, ConceptRatings, Critique, LineFixes, Source,
+                     StoryDraft, StoryPatch, StoryRecord)
 from .novelty import Embedder, FastEmbedder, concept_text, max_similarity
-from .prompts import (claims_prompt, concepts_prompt, critique_prompt, line_repair_prompt, patch_prompt,
-                      script_prompt, system_prompt)
+from .prompts import (claims_prompt, concept_rating_prompt, concepts_prompt, critique_prompt, line_repair_prompt,
+                      patch_prompt, revise_prompt, script_prompt, system_prompt)
 from .render import save_story
 from .repair import apply_line_fixes, apply_patch, auto_fix, line_issues
 from .research import ResearchError, fetch_article, trim_source
@@ -198,16 +198,90 @@ class StoryEngine:
                                 f"write a real-case story on that basis")
         return [c.model_copy(update={"id": i}) for i, c in enumerate(ok, 1)], source
 
-    def choose_concept(self, concepts: list[Concept]) -> tuple[Concept, float, np.ndarray, list[Concept]]:
+    def choose_concept(self, concepts: list[Concept], category: str, recent_titles: list[str]
+                       ) -> tuple[Concept, float, np.ndarray, list[Concept], dict[str, int]]:
+        """Novel enough first (embedding similarity), then the critic's best-rated among those."""
         history = self.db.embeddings()
         vecs = self.embedder.embed([concept_text(c.title, c.logline, c.twist) for c in concepts])
         sims = [max_similarity(v, history) for v in vecs]
-        order = sorted(range(len(concepts)), key=lambda i: sims[i])
-        best = order[0]
-        if sims[best] > self.cfg.novelty.max_similarity:
-            self.log(f"  warning: every concept resembles a past story (best similarity {sims[best]:.2f})")
-        self.log("  concepts: " + "; ".join(f"'{concepts[i].title}' sim={sims[i]:.2f}" for i in order))
-        return concepts[best], round(sims[best], 3), vecs[best], [concepts[i] for i in order[1:]]
+        pool = [i for i in range(len(concepts)) if sims[i] <= self.cfg.novelty.max_similarity]
+        if not pool:
+            self.log(f"  warning: every concept resembles a past story (best similarity {min(sims):.2f})")
+            pool = list(range(len(concepts)))
+        ratings = self.rate_concepts(concepts, category, recent_titles)
+        best = max(pool, key=lambda i: (ratings.get(i, -1), -sims[i]))
+        order = [best] + sorted((i for i in range(len(concepts)) if i != best), key=lambda i: -ratings.get(i, -1))
+        self.log("  concepts: " + "; ".join(f"'{concepts[i].title}' sim={sims[i]:.2f}"
+                                            + (f" rating={ratings[i]}/40" if i in ratings else "") for i in order))
+        named = {concepts[i].title: r for i, r in ratings.items()}
+        return concepts[best], round(sims[best], 3), vecs[best], [concepts[i] for i in order[1:]], named
+
+    def rate_concepts(self, concepts: list[Concept], category: str, recent_titles: list[str]) -> dict[int, int]:
+        """{concept index: total rating} from the critic model; {} when skipped or failed."""
+        critic = self.critic_provider()
+        if not self.cfg.quality.rate_concepts or critic.name == "ollama":
+            return {}   # rating on the slow local model is not worth the extra minutes
+        try:
+            ratings, _ = self._gen(ConceptRatings, name="rate-concepts", provider=critic, temperature=0.2,
+                                   max_tokens=1200, retries=1,
+                                   user=concept_rating_prompt(concepts, category, recent_titles))
+        except LLMError as exc:
+            self.log(f"  concept rating skipped: {str(exc)[:160]}")
+            return {}
+        return {r.index - 1: r.total for r in ratings.ratings if 1 <= r.index <= len(concepts)}
+
+    def is_local(self) -> bool:
+        return self.provider.name == "ollama"
+
+    def needs_revision(self, c: Critique) -> bool:
+        s = c.scores()
+        return (c.verdict == "revise" or min(s.values()) < self.cfg.rules.min_critique_score
+                or sum(s.values()) / len(s) < self.cfg.quality.target_avg_score)
+
+    @staticmethod
+    def _avg(c: Critique) -> float:
+        s = c.scores()
+        return round(sum(s.values()) / len(s), 2)
+
+    def improve(self, draft: StoryDraft, critique: Critique | None, base: str, target: int, category: str,
+                claims: list[Claim] | None) -> tuple[StoryDraft, Critique | None, bool, list[dict]]:
+        """Revise -> re-critique -> keep whichever version scores higher.
+
+        Hosted writer: full rewrites (seconds each, up to `revision_rounds`). Local model: one small
+        patch, because a full rewrite on the laptop CPU takes 10+ minutes.
+        """
+        if critique is None:
+            return draft, None, False, []
+        history = [{"round": 0, "scores": critique.scores(), "avg": self._avg(critique), "kept": True}]
+        best, best_c, revised = draft, critique, False
+        local = self.is_local()
+        for rnd in range(1, (1 if local else self.cfg.quality.revision_rounds) + 1):
+            if not self.needs_revision(best_c):
+                break
+            try:
+                if local:
+                    cand = best.model_copy(deep=True)
+                    patch, _ = self._gen(StoryPatch, name="revise", temperature=self.cfg.llm.temperature.script,
+                                         max_tokens=2000, retries=0,
+                                         user=patch_prompt(self.cfg, best, best_c, category, claims))
+                    self.log(f"  patch: {', '.join(apply_patch(cand, patch, category)) or 'no changes'}")
+                else:
+                    cand, _ = self._gen(StoryDraft, name=f"rewrite-{rnd}", temperature=self.cfg.llm.temperature.script,
+                                        max_tokens=5000, retries=1, user=revise_prompt(base, best, best_c))
+            except LLMError as exc:
+                self.log(f"  revision skipped: {str(exc)[:200]}")
+                break
+            self.polish(cand, target, category, claims)
+            c = self.critique(cand, category)
+            if c is None:
+                break
+            better = self._avg(c) > self._avg(best_c)
+            history.append({"round": rnd, "scores": c.scores(), "avg": self._avg(c), "kept": better})
+            self.log(f"  revision {rnd}: avg {self._avg(best_c)} -> {self._avg(c)}"
+                     + ("" if better else " (lower: keeping the previous version)"))
+            if better:
+                best, best_c, revised = cand, c, True
+        return best, best_c, revised, history
 
     def critic_provider(self):
         """A different hosted model than the writer when available (models grade themselves kindly)."""
@@ -284,7 +358,8 @@ class StoryEngine:
         concepts, _ = self._gen(ConceptList, name="concepts", temperature=self.cfg.llm.temperature.concepts,
                                 max_tokens=2500, user=concepts_prompt(self.cfg, category, target, ingredients,
                                                                        recent_titles, topic, claims))
-        concept, similarity, vec, alternatives = self.choose_concept(concepts.concepts)
+        concept, similarity, vec, alternatives, ratings = self.choose_concept(concepts.concepts, category,
+                                                                              recent_titles)
         self.log(f"  chosen: '{concept.title}' - {concept.logline}")
 
         devices = {d.id: d.desc for d in self.cfg.ingredients.device}
@@ -292,20 +367,8 @@ class StoryEngine:
         draft, _ = self._gen(StoryDraft, user=base, name="script",
                              temperature=self.cfg.llm.temperature.script, max_tokens=5000)
         self.polish(draft, target, category, claims)
-
-        critique, revised = self.critique(draft, category), False
-        if critique and (critique.verdict == "revise"
-                         or min(critique.scores().values()) < self.cfg.rules.min_critique_score):
-            try:   # optional step: one attempt only, a failure keeps the unrevised (already valid) draft
-                patch, _ = self._gen(StoryPatch, name="revise", temperature=self.cfg.llm.temperature.script,
-                                     max_tokens=2000, retries=0,
-                                     user=patch_prompt(self.cfg, draft, critique, category, claims))
-                changed = apply_patch(draft, patch, category)
-                self.log(f"  revision applied: {', '.join(changed) or 'no changes'}")
-                revised = bool(changed)
-                self.polish(draft, target, category, claims)
-            except LLMError as exc:
-                self.log(f"  revision skipped: {exc}")
+        draft, critique, revised, history = self.improve(draft, self.critique(draft, category), base, target,
+                                                         category, claims)
 
         problems = validate_story(draft, self.cfg, target, category, claims)
 
@@ -318,8 +381,9 @@ class StoryEngine:
             id=story_id, created_at=created.isoformat(timespec="seconds"), category=category,
             target_seconds=target, ingredients=ingredients, topic_id=topic.id if topic else None,
             concept=concept, concept_alternatives=alternatives, novelty_max_similarity=similarity,
-            draft=draft, critique=critique, revised=revised, problems=problems, sources=sources,
-            claims=claims or [], llm=self.stats, ai_disclosure=disclosure)
+            concept_ratings=ratings, draft=draft, critique=critique, critique_history=history,
+            revised=revised, problems=problems, sources=sources, claims=claims or [], llm=self.stats,
+            ai_disclosure=disclosure)
         out = save_story(record)
         scores = critique.scores() if critique else {}
         self.db.add_story(

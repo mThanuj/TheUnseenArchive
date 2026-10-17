@@ -120,7 +120,17 @@ def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
 def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique) -> str:
     return (f"{base_prompt}\n\nA previous draft:\n{draft.model_dump_json()}\n\nThe editor's critique "
             f"(scores {critique.scores()}):\n- " + "\n- ".join(critique.issues)
-            + "\n\nWrite the improved, complete script. Keep what works; fix every issue.")
+            + "\n\nWrite the improved, complete script. Keep what works; fix every issue. If hook, "
+              "escalation, originality, ending or visual variety scored below 7, rework the scene structure "
+              "and the ending itself, not just the wording.")
+
+
+def concept_rating_prompt(concepts: list[Concept], category: str, recent_titles: list[str]) -> str:
+    listed = "\n".join(f"{i}. {c.title}: {c.logline} Twist: {c.twist}" for i, c in enumerate(concepts, 1))
+    recent = ("\nRecent stories on the channel:\n" + "\n".join(f"- {t}" for t in recent_titles)) if recent_titles else ""
+    return (f"Rate these concepts for {CATEGORY_BRIEF[category]} (an Instagram Reel of about 30 seconds). Be "
+            f"harsh and calibrated: typical concepts score 5-7, 9-10 only for exceptional ones. Rate every "
+            f"concept by its number.{recent}\n\n{listed}")
 
 
 def patch_prompt(cfg: StoryConfig, draft: StoryDraft, critique: Critique, category: str,

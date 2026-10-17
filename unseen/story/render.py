@@ -67,6 +67,18 @@ def to_markdown(r: StoryRecord) -> str:
             "",
         ]
     lines += ["## Ending", "", d.ending_note, "", "## Caption draft", "", d.caption, "", r.ai_disclosure, ""]
+    if r.critique:
+        lines += ["## Editor notes (final critique)", ""]
+        lines += [f"- {i}" for i in r.critique.issues] or ["- (none)"]
+        if r.critique_history:
+            lines.append("")
+            lines += [f"- round {h['round']}: avg {h['avg']}{'' if h['kept'] else ' (discarded)'} {h['scores']}"
+                      for h in r.critique_history]
+        lines.append("")
+    if r.concept_ratings:
+        lines += ["## Concept ratings (/40)", ""]
+        lines += [f"- {title}: {score}" for title, score in sorted(r.concept_ratings.items(), key=lambda x: -x[1])]
+        lines.append("")
     if r.claims:
         lines += ["## Claims (quote-verified against the source)", ""]
         lines += [f"- [{c.id}] ({c.tag}) {c.text}  \n  > {c.quote}" for c in r.claims]

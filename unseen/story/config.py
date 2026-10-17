@@ -108,6 +108,12 @@ class NoveltyCfg(BaseModel):
     recent_titles_in_prompt: int = 12
 
 
+class QualityCfg(BaseModel):
+    rate_concepts: bool = True
+    revision_rounds: int = 2
+    target_avg_score: float = 7.5
+
+
 class RealMysteryCfg(BaseModel):
     min_years_ago_sensitive: int
     max_source_chars: int
@@ -122,6 +128,7 @@ class StoryConfig(BaseModel):
     ingredients: Ingredients
     rules: Rules
     novelty: NoveltyCfg = NoveltyCfg()
+    quality: QualityCfg = QualityCfg()
     real_mystery: RealMysteryCfg
 
 

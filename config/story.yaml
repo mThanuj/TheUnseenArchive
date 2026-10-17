@@ -22,7 +22,9 @@ llm:
     timeout_s: 2400 # CPU generation of a full script can take several minutes
   gemini: # key: https://aistudio.google.com/apikey -> GEMINI_API_KEY
     url: https://generativelanguage.googleapis.com/v1beta
-    model: gemini-2.5-flash # check current names: uv run unseen llm-models --provider gemini
+    # auto = newest stable gemini-X.Y-flash model your free key can use (falls back to older ones),
+    # so a retired model never breaks the daily run. Or pin one, e.g. gemini-2.5-flash.
+    model: auto # list: uv run unseen llm-models --provider gemini
     timeout_s: 300
     # Gemini 2.5 "thinks" before answering and those tokens count against the output limit;
     # unbounded thinking truncated long real-mystery scripts. 0 disables thinking.
@@ -39,7 +41,7 @@ llm:
       key_env: CEREBRAS_API_KEY
     openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY; ":free" models are rate-capped
       url: https://openrouter.ai/api/v1
-      model: "meta-llama/llama-3.3-70b-instruct:free" # check: uv run unseen llm-models --provider openrouter
+      model: "google/gemma-4-31b-it:free" # free; alternatives: nvidia/nemotron-3-ultra-550b-a55b:free, thinkingmachines/inkling:free
       key_env: OPENROUTER_API_KEY
   temperature:
     concepts: 1.0
@@ -184,6 +186,11 @@ rules:
 novelty:
   max_similarity: 0.86 # cosine similarity to any past story above this = too similar
   recent_titles_in_prompt: 12 # shown to the model as "do not repeat"
+
+quality:
+  rate_concepts: true # the critic model rates the 5 concepts; the best novel one is written (hosted models only)
+  revision_rounds: 2 # hosted writer: full rewrite + re-critique per round; the local model gets one quick patch
+  target_avg_score: 7.5 # stop revising once the average reaches this and no score is below min_critique_score
 
 real_mystery:
   min_years_ago_sensitive: 40 # cases where people died or vanished must be historical

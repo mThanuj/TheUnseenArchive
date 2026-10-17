@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import httpx
 
@@ -32,6 +33,7 @@ class GeminiProvider:
         # Thinking tokens count against maxOutputTokens: unbounded thinking truncated long scripts.
         self.thinking_budget = thinking_budget
         self.max_output_tokens = max_output_tokens
+        self.log = print
 
     def list_models(self) -> list[str]:
         try:
@@ -43,6 +45,22 @@ class GeminiProvider:
             raise LLMError(f"gemini returned {r.status_code}: {r.text[:300]}")
         return sorted(m["name"].removeprefix("models/") for m in r.json().get("models", [])
                       if "generateContent" in m.get("supportedGenerationMethods", []))
+
+    def auto_candidates(self) -> list[str]:
+        """Stable 'gemini-X.Y-flash' models, newest first (no lite/image/preview variants)."""
+        found = []
+        for name in self.list_models():
+            m = re.fullmatch(r"gemini-(\d+)(?:\.(\d+))?-flash", name)
+            if m:
+                found.append(((int(m.group(1)), int(m.group(2) or 0)), name))
+        return [n for _, n in sorted(found, reverse=True)]
+
+    def _post(self, model: str, body: dict) -> httpx.Response:
+        try:
+            return httpx.post(f"{self.url}/models/{model}:generateContent", json=body,
+                              headers={"x-goog-api-key": self._key}, timeout=self.timeout_s)
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Gemini request failed: {exc!r}") from None
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:
@@ -56,16 +74,25 @@ class GeminiProvider:
                                                               f"this JSON Schema:\n{json.dumps(schema)}"}]}],
             "generationConfig": config,
         }
-        for _ in range(2):
-            try:
-                r = httpx.post(f"{self.url}/models/{self.model}:generateContent", json=body,
-                               headers={"x-goog-api-key": self._key}, timeout=self.timeout_s)
-            except httpx.HTTPError as exc:
-                raise LLMError(f"Gemini request failed: {exc!r}") from None
-            if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in config:
-                config.pop("thinkingConfig")   # model without a thinking budget setting
-                self.thinking_budget = None
-                continue
+        # model 'auto': newest stable Flash model the key can actually use (404/403/429 -> next one)
+        auto = self.model == "auto"
+        candidates = self.auto_candidates() if auto else [self.model]
+        if not candidates:
+            raise LLMError("gemini: no gemini-X.Y-flash model available to this key; set llm.gemini.model")
+        r = None
+        for model in candidates:
+            for _ in range(2):
+                r = self._post(model, body)
+                if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in config:
+                    config.pop("thinkingConfig")   # model without a thinking budget setting
+                    self.thinking_budget = None
+                    continue
+                break
+            if auto and r.status_code in (403, 404, 429) and model != candidates[-1]:
+                continue   # not on this key's free tier: try the next newest
+            if auto and r.status_code == 200:
+                self.model = model
+                self.log(f"  gemini model auto-selected: {model}")
             break
         if r.status_code == 429:
             raise LLMError("Gemini free-tier rate limit reached; try later or use provider: ollama")

@@ -155,7 +155,7 @@ def _copy(body):
 
 
 def test_critic_is_a_different_hosted_model(tmp_path, monkeypatch):
-    from storyfakes import CONCEPTS, CRITIQUE_PASS, FakeEmbedder, FakeProvider, draft_dict
+    from storyfakes import CONCEPTS, CRITIQUE_PASS, RATINGS, FakeEmbedder, FakeProvider, draft_dict
     import unseen.story.render as render
     from unseen.state.db import StateDB
     from unseen.story.engine import StoryEngine
@@ -163,12 +163,13 @@ def test_critic_is_a_different_hosted_model(tmp_path, monkeypatch):
     monkeypatch.setattr(render, "STORIES_DIR", tmp_path / "stories")
     writer = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict()], "Critique": [CRITIQUE_PASS]})
     writer.name = "gemini"
-    critic = FakeProvider({"Critique": [CRITIQUE_PASS]})
+    critic = FakeProvider({"ConceptRatings": [RATINGS], "Critique": [CRITIQUE_PASS]})
     critic.name = "groq"
     local = FakeProvider({})
     local.name = "ollama"
     engine = StoryEngine(provider=FallbackProvider([writer, critic, local], log=lambda m: None),
                          db=StateDB(tmp_path / "t.db"), embedder=FakeEmbedder(), seed=5, log=lambda m: None)
     record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
-    assert writer.calls == ["ConceptList", "StoryDraft"] and critic.calls == ["Critique"] and local.calls == []
-    assert [s["provider"] for s in record.llm] == ["gemini", "gemini", "groq"]
+    assert writer.calls == ["ConceptList", "StoryDraft"] and local.calls == []
+    assert critic.calls == ["ConceptRatings", "Critique"]   # the critic rates concepts and the script
+    assert [s["provider"] for s in record.llm] == ["gemini", "groq", "gemini", "groq"]

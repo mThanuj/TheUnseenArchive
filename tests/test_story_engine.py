@@ -3,7 +3,7 @@ import json
 import pytest
 
 import unseen.story.render as render
-from storyfakes import CONCEPTS, CRITIQUE_PASS, FakeEmbedder, FakeProvider, draft_dict
+from storyfakes import CONCEPTS, CRITIQUE_PASS, CRITIQUE_WEAK, RATINGS, FakeEmbedder, FakeProvider, draft_dict
 from unseen.state.db import StateDB
 from unseen.story.config import Topic
 from unseen.story.engine import StoryEngine
@@ -38,34 +38,65 @@ def env(tmp_path, monkeypatch):
 
 
 def test_fiction_pipeline_writes_files_and_db(env):
-    provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict()], "Critique": [CRITIQUE_PASS]})
+    provider = FakeProvider({"ConceptList": [CONCEPTS], "ConceptRatings": [RATINGS], "StoryDraft": [draft_dict()],
+                             "Critique": [CRITIQUE_PASS]})
     db = StateDB(env / "t.db")
     engine = StoryEngine(provider=provider, db=db, embedder=FakeEmbedder(), seed=1, log=lambda m: None)
     record, out = engine.new_story(category="fiction_horror", target_seconds=30)
     assert record.problems == [] and not record.revised
+    assert record.concept.title == "Second Shift" and record.concept_ratings["Second Shift"] == 33
     assert set(record.ingredients) == {"device", "location", "anomaly", "structure", "twist"}
     assert (out / "story.json").is_file() and (out / "story.md").is_file()
     prompts = json.loads((out / "prompts.json").read_text(encoding="utf-8"))
     assert len(prompts) == len(record.draft.scenes) and all(p["text"] for p in prompts)
     assert len({p["id"] for p in prompts}) == len(prompts)
     assert db.get(record.id)["title"] == "Room Nine" and len(db.embeddings()) == 1
-    assert provider.calls == ["ConceptList", "StoryDraft", "Critique"] and provider.unloaded
+    assert provider.calls == ["ConceptList", "ConceptRatings", "StoryDraft", "Critique"] and provider.unloaded
     assert "AI-generated" in record.ai_disclosure
+    assert "Editor notes" in (out / "story.md").read_text(encoding="utf-8")
 
 
-def test_critique_triggers_one_patch_revision(env):
-    revise = dict(CRITIQUE_PASS, ending=5, verdict="revise", issues=["scene 7: ending is flat"])
+def test_local_model_gets_one_patch_then_a_second_critique(env):
     patch = {"narration": [{"id": 6, "text": "The camera in the footage is still recording.", "claim_ids": []}],
              "scenes": [{"id": 7, "video_prompt": ""}], "ending_note": "Sharper ending."}
     provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict()],
-                             "Critique": [revise], "StoryPatch": [patch]})
+                             "Critique": [CRITIQUE_WEAK, CRITIQUE_PASS], "StoryPatch": [patch]})
+    provider.name = "ollama"
     engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=2,
                          log=lambda m: None)
     record, _ = engine.new_story(category="psychological_mystery", target_seconds=30)
     assert record.revised and record.draft.ending_note == "Sharper ending."
     assert record.draft.narration[5].text == "The camera in the footage is still recording."
     assert record.draft.scenes[6].video_prompt            # empty edit keeps the original
-    assert provider.calls.count("StoryDraft") == 1 and "StoryPatch" in provider.calls
+    assert provider.calls == ["ConceptList", "StoryDraft", "Critique", "StoryPatch", "Critique"]
+    assert [h["avg"] for h in record.critique_history] == [7.25, 8.0]
+    assert all(h["kept"] for h in record.critique_history)
+
+
+def test_hosted_writer_rewrites_and_keeps_the_better_version(env):
+    improved = draft_dict(ending_note="Sharper ending.")
+    provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict(), improved],
+                             "Critique": [CRITIQUE_WEAK, CRITIQUE_PASS]})
+    engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=3,
+                         log=lambda m: None)
+    record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
+    assert record.revised and record.draft.ending_note == "Sharper ending."
+    assert provider.calls.count("StoryDraft") == 2 and "StoryPatch" not in provider.calls
+    assert record.critique.scores()["ending"] == 8
+
+
+def test_rewrite_that_scores_lower_is_discarded(env):
+    worse = dict(CRITIQUE_WEAK, hook=3)
+    provider = FakeProvider({"ConceptList": [CONCEPTS],
+                             "StoryDraft": [draft_dict(), draft_dict(ending_note="Worse 1."),
+                                            draft_dict(ending_note="Worse 2.")],
+                             "Critique": [CRITIQUE_WEAK, worse]})
+    engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=6,
+                         log=lambda m: None)
+    record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
+    assert not record.revised and record.draft.ending_note == "The camera is not hers."
+    assert [h["kept"] for h in record.critique_history] == [True, False, False]
+    assert provider.calls.count("StoryDraft") == 3          # script + revision_rounds rewrites
 
 
 def test_rule_breaking_lines_are_rewritten_not_the_whole_script(env):
@@ -79,7 +110,8 @@ def test_rule_breaking_lines_are_rewritten_not_the_whole_script(env):
     record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
     assert record.draft.narration[0].text == "The tape starts mid-step."
     assert record.problems == []
-    assert provider.calls == ["ConceptList", "StoryDraft", "LineFixes", "Critique"]
+    # ConceptRatings has no fake answer here: rating is skipped and the most novel concept is used
+    assert provider.calls == ["ConceptList", "ConceptRatings", "StoryDraft", "LineFixes", "Critique"]
 
 
 def test_real_mystery_uses_only_verified_claims(env):
