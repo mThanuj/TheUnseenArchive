@@ -1,0 +1,36 @@
+[project]
+name = "unseen-archive"
+version = "0.1.0"
+description = "The Unseen Archive: automated found-footage horror/mystery Reel pipeline"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.7",
+    "psutil>=5.9",
+    "nvidia-ml-py>=12.535",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pillow>=10.3",
+    "huggingface_hub>=0.30",
+    "tzdata>=2024.1",
+]
+
+[project.scripts]
+unseen = "unseen.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["unseen"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

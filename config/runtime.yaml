@@ -1,0 +1,34 @@
+# Pinned video-generation runtime. Versions here were checked on 2026-10-17; change them
+# deliberately and re-run `unseen bench-video` after any upgrade.
+
+comfyui:
+  repo: https://github.com/Comfy-Org/ComfyUI.git
+  ref: v0.41.3
+  commit: 8713616fcc321624e306bbd36be5906203dcb0dc
+  python: "3.13"                 # ComfyUI README: "Python 3.13 is very well supported"
+  torch_index_url: https://download.pytorch.org/whl/cu130   # README: cu130+ required on RTX 20-series and newer
+  min_driver_cuda: "13.0"        # `nvidia-smi` header "CUDA Version" must be >= this
+  host: 127.0.0.1
+  port: 8188
+  startup_timeout_s: 300
+  base_args:                     # always passed to ComfyUI's main.py
+    - --disable-auto-launch
+    - --disable-api-nodes        # never load paid partner/API nodes
+  # Memory strategies the benchmark compares. In v0.41 "dynamic VRAM" is the NVIDIA default and
+  # `--lowvram` is a no-op unless dynamic VRAM is disabled (see comfy/cli_args.py at the pinned tag).
+  memory_modes:
+    dynamic: []
+    classic_lowvram: [--disable-dynamic-vram, --lowvram]
+    classic_novram: [--disable-dynamic-vram, --novram]
+
+custom_nodes:
+  - name: ComfyUI-GGUF
+    repo: https://github.com/city96/ComfyUI-GGUF.git
+    commit: 6ea2651e7df66d7585f6ffee804b20e92fb38b8a
+
+paths:                           # relative to the repository root
+  comfyui_dir: runtime/ComfyUI
+  comfy_venv: runtime/comfy-venv
+  comfy_work: runtime/comfy-work # ComfyUI output/temp/user dirs
+  models_dir: models             # passed as --models-directory
+  bench_dir: bench_results

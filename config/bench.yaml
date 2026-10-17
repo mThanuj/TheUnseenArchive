@@ -1,0 +1,122 @@
+# Milestone 1 benchmark: can this machine generate genuine AI motion, how fast, and how big?
+#
+# Phases (see unseen/bench/video_bench.py):
+#   probe   - quick preset with each memory mode -> pick the fastest mode that completes cleanly
+#   ladder  - escalate resolution/length with that mode until OOM, spill, or time limit
+#   quality - largest passing preset x every variant x every prompt (warm server) for visual review
+# `--quick` runs exactly one clip: first memory mode, quick preset, first prompt, first variant.
+
+gate:
+  max_minutes_per_clip: 20        # ~10 scene clips must fit in one overnight run
+  min_clip_seconds: 2.0
+  # Motion thresholds are PROVISIONAL (calibrated only on synthetic tests). Units: optical-flow
+  # pixels per frame at 256 px width. "local" = flow left over after removing the best-fit global
+  # zoom/pan/rotate, i.e. motion a Ken Burns effect on a still image cannot produce.
+  min_local_motion_p98: 0.30
+  max_duplicate_frame_ratio: 0.50
+  spill_threshold_mb: 768         # shared-GPU-memory growth that counts as a VRAM spill
+
+case_timeout_minutes: 45
+memory_modes: [dynamic, classic_lowvram]
+fallback_memory_modes: [classic_novram]   # tried only if every mode above fails the quick preset
+
+negative_prompt: >-
+  polished cinematic lighting, studio lighting, oversaturated, vivid colors, cartoon, anime,
+  illustration, painting, 3d render, CGI, text, watermark, logo, subtitles, static image, still
+  frame, frozen, slideshow, deformed hands, extra limbs, distorted face, monster, gore,
+  色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，最差质量，低质量，丑陋的，残缺的，多余的手指，
+  画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿
+
+prompts:
+  - id: flashlight_corridor
+    seed: 1001
+    text: >-
+      Found footage recorded on an old handheld camcorder at night inside an abandoned hospital
+      corridor. A weak flashlight beam sweeps slowly across peeling green paint, an overturned
+      wheelchair and broken glass on the floor. The camera walks forward with unsteady handheld
+      shake, hesitates, then at the far end of the corridor a heavy door slowly swings open by
+      itself into darkness. Underexposed, deep shadows, muted desaturated colors, sensor noise,
+      low-resolution home video, realistic, amateur recording.
+  - id: cctv_figure
+    seed: 1002
+    text: >-
+      Static high-angle CCTV security camera footage of a dim, empty underground parking garage
+      at night. A fluorescent tube flickers on and off. A pale person in dark clothes walks slowly
+      out from behind a concrete pillar, stops in the middle of the frame and slowly turns their
+      head toward the camera. Grainy black and white surveillance video, wide-angle lens
+      distortion, low light, realistic.
+  - id: nightvision_forest
+    seed: 1003
+    text: >-
+      Night-vision infrared footage, handheld, walking through a dense pine forest at night.
+      Green monochrome image. Between distant tree trunks two small bright reflective eyes
+      appear, blink, and move behind a tree. The camera turns quickly to follow them and briefly
+      loses focus. Heavy noise, very low light, realistic amateur recording.
+
+models:
+  ltxv:
+    label: LTX-Video 2B 0.9.6 distilled (GGUF Q8_0)
+    workflow: ltxv_t2v
+    files: {diffusion: ltxv_2b_096_distilled_q8, text_encoder: t5xxl_q5km, vae: ltxv_096_vae}
+    fps: 24
+    steps: 8                      # official distilled config: 8 steps, guidance 1
+    cfg: 1.0
+    sampler: euler
+    constraints: {dim_multiple: 32, frame_step: 8}     # frames = 8n+1
+    variants:
+      - {name: ltxv_scheduler}    # core LTXVScheduler sigmas
+      # Hand-tuned distilled schedule used in Lightricks' ComfyUI workflows (UNVERIFIED for 0.9.6).
+      - {name: distilled_sigmas, sigmas: "1.0, 0.9937, 0.9875, 0.9812, 0.975, 0.9094, 0.725, 0.4219, 0.0"}
+    quick: {width: 512, height: 768, frames: 49}
+    ladder:
+      - {width: 512, height: 768, frames: 49}
+      - {width: 512, height: 768, frames: 97}
+      - {width: 576, height: 1024, frames: 97}
+    floor:
+      - {width: 384, height: 640, frames: 49}
+  wan21:
+    label: Wan 2.1 T2V 1.3B (fp16)
+    workflow: wan21_t2v
+    files: {diffusion: wan21_t2v_13b_fp16, text_encoder: umt5xxl_q5km, vae: wan21_vae}
+    fps: 16
+    steps: 25
+    cfg: 6.0
+    sampler: uni_pc
+    scheduler: simple
+    shift: 8.0
+    constraints: {dim_multiple: 16, frame_step: 4}     # frames = 4n+1
+    variants:
+      - {name: default}
+    quick: {width: 480, height: 832, frames: 33}
+    ladder:
+      - {width: 480, height: 832, frames: 33}
+      - {width: 480, height: 832, frames: 49}
+      - {width: 480, height: 832, frames: 81}
+    floor:
+      - {width: 368, height: 640, frames: 33}
+  wan22:
+    label: Wan 2.2 TI2V 5B Turbo (GGUF Q3_K_M) - only if ltxv/wan21 pass but look poor
+    workflow: wan22_ti2v
+    files: {diffusion: wan22_ti2v_5b_turbo_q3km, text_encoder: umt5xxl_q5km, vae: wan22_vae}
+    fps: 24
+    steps: 4
+    cfg: 1.0
+    sampler: euler
+    scheduler: simple
+    shift: 8.0
+    constraints: {dim_multiple: 32, frame_step: 4}
+    variants:
+      - {name: default}
+    quick: {width: 448, height: 800, frames: 49}
+    ladder:
+      - {width: 448, height: 800, frames: 49}
+      - {width: 448, height: 800, frames: 73}
+      - {width: 576, height: 1024, frames: 49}
+    floor:
+      - {width: 352, height: 640, frames: 33}
+
+vae_tiling:                       # VAE decode is the usual OOM point on 4 GB; always decode tiled
+  tile_size: 256
+  overlap: 64
+  temporal_size: 32
+  temporal_overlap: 8

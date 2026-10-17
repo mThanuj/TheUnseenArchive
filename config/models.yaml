@@ -1,0 +1,104 @@
+# Every model file the tooling may download. Sizes and sha256 values were copied from the
+# Hugging Face LFS metadata of each repo on 2026-10-17; downloads are verified against them.
+# `dest` is the ComfyUI model sub-folder under models/.
+
+licenses:
+  apache-2.0:
+    name: Apache License 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+    commercial_use: "yes"
+    obligations: "Keep license/attribution notices when redistributing weights (we do not redistribute)."
+  ltxv-open-weights-2025-04:
+    name: LTXV Open Weights License (LTX Video-2B-Distilled-04-25)
+    url: https://huggingface.co/city96/LTX-Video-0.9.6-distilled-gguf/blob/main/LICENSE.md
+    commercial_use: "yes for entities with annual revenue < $10,000,000; above that a paid license is required"
+    obligations: >-
+      Attachment A use restrictions apply. Notably (e): content must not be disseminated
+      "without expressly and intelligibly disclaiming that the information and/or content is
+      machine generated" -- every published Reel must carry an AI-generated disclosure.
+
+files:
+  ltxv_2b_096_distilled_q8:
+    repo: city96/LTX-Video-0.9.6-distilled-gguf
+    path: ltxv-2b-0.9.6-distilled-04-25-Q8_0.gguf
+    dest: diffusion_models
+    size: 2087907840
+    sha256: 8fb7ab6680b5811a81396375ffe8595ba2fd70e0727f9dcbeb80a00459b38dd7
+    license: ltxv-open-weights-2025-04
+  ltxv_2b_096_distilled_q4km:
+    repo: city96/LTX-Video-0.9.6-distilled-gguf
+    path: ltxv-2b-0.9.6-distilled-04-25-Q4_K_M.gguf
+    dest: diffusion_models
+    size: 1330049536
+    sha256: edf8444dff7a15108c4e6a4e1184f5cab89fb1d5fd4a93f13b38da9b4110630c
+    license: ltxv-open-weights-2025-04
+  ltxv_096_vae:
+    repo: city96/LTX-Video-0.9.6-distilled-gguf
+    path: LTX-Video-0.9.6-VAE-BF16.safetensors
+    dest: vae
+    size: 2493857180
+    sha256: ee5ddcebc0b92d81b8aed9ee43445b7a4e66df1acf180678c5aa40e82f898dc5
+    license: ltxv-open-weights-2025-04
+  t5xxl_q5km:
+    repo: city96/t5-v1_1-xxl-encoder-gguf
+    path: t5-v1_1-xxl-encoder-Q5_K_M.gguf
+    dest: text_encoders
+    size: 3386856640
+    sha256: b51cbb10b1a7aac6dd1c3b62f0ed908bfd06e0b42d2f3577d43e061361f51dae
+    license: apache-2.0
+  t5xxl_q4km:
+    repo: city96/t5-v1_1-xxl-encoder-gguf
+    path: t5-v1_1-xxl-encoder-Q4_K_M.gguf
+    dest: text_encoders
+    size: 2896123072
+    sha256: 6be2b0b7e2de7cf2919340c88cb802a103a997ce46c53131cec91958c1db1af4
+    license: apache-2.0
+  umt5xxl_q5km:
+    repo: city96/umt5-xxl-encoder-gguf
+    path: umt5-xxl-encoder-Q5_K_M.gguf
+    dest: text_encoders
+    size: 4145878880
+    sha256: eaea358bb438c5d211721a4feecc162000e3636e9cb96f51e216f1f44ebd12ce
+    license: apache-2.0
+  umt5xxl_q4km:
+    repo: city96/umt5-xxl-encoder-gguf
+    path: umt5-xxl-encoder-Q4_K_M.gguf
+    dest: text_encoders
+    size: 3655145312
+    sha256: 17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40
+    license: apache-2.0
+  wan21_t2v_13b_fp16:
+    repo: Comfy-Org/Wan_2.1_ComfyUI_repackaged
+    path: split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors
+    dest: diffusion_models
+    size: 2838303560
+    sha256: be531024cd9018cb5b48c40cfbb6a6191645b1c792eb8bf4f8c1c6e10f924dc5
+    license: apache-2.0
+  wan21_vae:
+    repo: Comfy-Org/Wan_2.1_ComfyUI_repackaged
+    path: split_files/vae/wan_2.1_vae.safetensors
+    dest: vae
+    size: 253815318
+    sha256: 2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b
+    license: apache-2.0
+  wan22_ti2v_5b_turbo_q3km:
+    repo: hum-ma/Wan2.2-TI2V-5B-Turbo-GGUF
+    path: Wan2_2-TI2V-5B-Turbo-Q3_K_M.gguf
+    dest: diffusion_models
+    size: 2552601312
+    sha256: ec95d8d0e18df9cc910e56de04494e0ef4c0200da8a92b7a0677258cdbadd2e0
+    license: apache-2.0
+  wan22_vae:
+    repo: Comfy-Org/Wan_2.2_ComfyUI_Repackaged
+    path: split_files/vae/wan2.2_vae.safetensors
+    dest: vae
+    size: 1409400960
+    sha256: e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156
+    license: apache-2.0
+
+sets:
+  ltxv: [ltxv_2b_096_distilled_q8, t5xxl_q5km, ltxv_096_vae]                 # ~8.0 GB
+  ltxv_lite: [ltxv_2b_096_distilled_q4km, t5xxl_q4km, ltxv_096_vae]          # ~6.7 GB, if RAM is tight
+  wan21: [wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]                       # ~7.2 GB
+  wan22: [wan22_ti2v_5b_turbo_q3km, umt5xxl_q5km, wan22_vae]                 # ~8.1 GB (shares UMT5 with wan21)
+  bench: [ltxv_2b_096_distilled_q8, t5xxl_q5km, ltxv_096_vae, wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]

@@ -1,0 +1,25 @@
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Heavy local runtime: ComfyUI checkout, its venv, model weights
+runtime/
+models/
+
+# Benchmark artifacts: keep report.md, results.json and contact sheets; ignore bulky outputs
+bench_results/**/frames/
+bench_results/**/*.mp4
+bench_results/**/*.log
+
+# Secrets
+.env
+*.secret
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
