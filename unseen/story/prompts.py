@@ -63,7 +63,10 @@ def concepts_prompt(cfg: StoryConfig, category: str, target_seconds: int, ingred
         parts.append("Recent stories on the channel (do NOT repeat their premise, setting or twist):\n"
                      + "\n".join(f"- {t}" for t in recent_titles))
     parts.append("Make the 5 concepts genuinely different from each other in premise, device and ending. "
-                 "Each anomaly must be something a camera can SHOW, not only something heard or felt.")
+                 "Each anomaly must be something a camera can SHOW, not only something heard or felt. Keep each "
+                 "concept SIMPLE: one place, one anomaly, one reveal, understandable on the first watch (a "
+                 "30-second Reel cannot carry several mysteries). visual_hook = what we see in the very first "
+                 "second; rewatch_clue = a visible detail planted early that the ending makes the viewer look for.")
     return "\n\n".join(parts)
 
 
@@ -82,6 +85,9 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
     parts = [
         f"Write the full Reel script for this concept ({CATEGORY_BRIEF[category]}):\n"
         f"{concept.model_dump_json(indent=2)}",
+        f"Scene 1 must SHOW the visual hook ({concept.visual_hook}) within its first second. Plant the rewatch "
+        f"clue ({concept.rewatch_clue}) visibly in an early scene; the final narration line points the viewer "
+        f"back to it. One place, one anomaly, one reveal: cut anything that needs explaining.",
         f"Timing: write EXACTLY {n_scenes} scenes (about {target_seconds} s in total); each scene is ONE "
         f"generated video clip of {ln.scene_seconds.min:g}-{ln.scene_seconds.max:g} s (usually "
         f"{ln.scene_seconds.typical:g} s). Narration totals about {words_target} spoken words, delivered slowly "
@@ -118,6 +124,12 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
         "'me' as the person filming), except when quoting a log or a voice heard on the tape.",
     ]
     if category == "real_mystery":
+        parts.append("Real case framing: this is a RECONSTRUCTION. archive_entry starts with 'RECONSTRUCTION -' "
+                     "and names the case and date; never present any tape, reel, film, recording or document as "
+                     "real evidence, and never invent investigations, simulations or files. Open with the most "
+                     "arresting documented detail from the claims (a last message, a number, what was found); "
+                     "exact quoted words are allowed only if they appear in that claim's source quote. Tell it in "
+                     "order: what happened, what was found, what remains unexplained; hedged theories come last.")
         parts.append("Real case era: the footage is EITHER period footage shot around the event (only devices "
                      "that existed then; before ~1925 no film camera existed) OR a present-day revisit of the "
                      "place (recorded_year = this year, modern devices) narrated over what remains today. "
@@ -153,10 +165,12 @@ def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique, check
 
 
 def concept_rating_prompt(concepts: list[Concept], category: str, recent_titles: list[str]) -> str:
-    listed = "\n".join(f"{i}. {c.title}: {c.logline} Twist: {c.twist}" for i, c in enumerate(concepts, 1))
+    listed = "\n".join(f"{i}. {c.title}: {c.logline} First second: {c.visual_hook}. Twist: {c.twist}"
+                       for i, c in enumerate(concepts, 1))
     recent = ("\nRecent stories on the channel:\n" + "\n".join(f"- {t}" for t in recent_titles)) if recent_titles else ""
     return (f"Rate these concepts for {CATEGORY_BRIEF[category]} (an Instagram Reel of about 30 seconds). Be "
-            f"harsh and calibrated: typical concepts score 5-7, 9-10 only for exceptional ones. Rate every "
+            f"harsh and calibrated: typical concepts score 5-7, 9-10 only for exceptional ones. Penalize "
+            f"concepts that are too complicated to understand on one watch. Rate every "
             f"concept by its number.{recent}\n\n{listed}")
 
 

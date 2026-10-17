@@ -46,14 +46,17 @@ class GeminiProvider:
         return sorted(m["name"].removeprefix("models/") for m in r.json().get("models", [])
                       if "generateContent" in m.get("supportedGenerationMethods", []))
 
-    def auto_candidates(self) -> list[str]:
-        """Stable 'gemini-X.Y-flash' models, newest first (no lite/image/preview variants)."""
-        found = []
-        for name in self.list_models():
-            m = re.fullmatch(r"gemini-(\d+)(?:\.(\d+))?-flash", name)
-            if m:
-                found.append(((int(m.group(1)), int(m.group(2) or 0)), name))
-        return [n for _, n in sorted(found, reverse=True)]
+    def auto_candidates(self, include_pro: bool = False) -> list[str]:
+        """Stable 'gemini-X.Y-flash' models newest first (no lite/image/preview); with include_pro,
+        stable '-pro' models are tried before them."""
+        def stable(kind: str) -> list[str]:
+            found = []
+            for name in self.list_models():
+                m = re.fullmatch(rf"gemini-(\d+)(?:\.(\d+))?-{kind}", name)
+                if m:
+                    found.append(((int(m.group(1)), int(m.group(2) or 0)), name))
+            return [n for _, n in sorted(found, reverse=True)]
+        return (stable("pro") if include_pro else []) + stable("flash")
 
     def _post(self, model: str, body: dict) -> httpx.Response:
         try:
@@ -75,8 +78,8 @@ class GeminiProvider:
             "generationConfig": config,
         }
         # model 'auto': newest stable Flash model the key can actually use (404/403/429 -> next one)
-        auto = self.model == "auto"
-        candidates = self.auto_candidates() if auto else [self.model]
+        auto = self.model in ("auto", "auto-pro")
+        candidates = self.auto_candidates(self.model == "auto-pro") if auto else [self.model]
         if not candidates:
             raise LLMError("gemini: no gemini-X.Y-flash model available to this key; set llm.gemini.model")
         r = None

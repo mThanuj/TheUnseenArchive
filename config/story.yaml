@@ -26,6 +26,8 @@ llm:
     url: https://generativelanguage.googleapis.com/v1beta
     # auto = newest stable gemini-X.Y-flash model your free key can use (falls back to older ones),
     # so a retired model never breaks the daily run. Or pin one, e.g. gemini-2.5-flash.
+    # auto-pro = try the newest gemini-X.Y-pro first (better writing; free quota may be small or
+    # absent), then fall back to flash models.
     model: auto # list: uv run unseen llm-models --provider gemini
     timeout_s: 300
     # Gemini 2.5 "thinks" before answering and those tokens count against the output limit;
@@ -87,6 +89,11 @@ length: # varied on purpose; seconds of finished Reel
 # Ingredients are sampled per story (and cooled down for a few days) to force variety.
 ingredients:
   cooldown_stories: 5
+  # A 20-50 s Reel holds ONE place, ONE anomaly, ONE reveal. Device, location and anomaly are always
+  # used; a twist only sometimes, a narrative structure only for longer Reels.
+  twist_probability: 0.5
+  structure_probability: 0.3
+  structure_min_seconds: 40
   device: # since = first year the device could plausibly record such footage (era checks)
     - { id: camcorder, desc: "early-2000s handheld camcorder", since: 1983 }
     - { id: cctv, desc: "fixed high-angle security camera", since: 1965 }
@@ -206,7 +213,8 @@ novelty:
 
 quality:
   rate_concepts: true # the critic model rates the 5 concepts; the best novel one is written (hosted models only)
-  revision_rounds: 2 # hosted writer: full rewrite + re-critique per round; the local model gets one quick patch
+  drafts: 2 # hosted writer: script the top-N concepts and keep the best-scoring draft (local model: 1)
+  revision_rounds: 1 # then rewrite + re-critique this many times; the local model gets one quick patch
   target_avg_score: 7.5 # stop revising once the average reaches this and no score is below min_critique_score
 
 real_mystery:

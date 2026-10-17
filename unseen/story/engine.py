@@ -119,7 +119,8 @@ class StoryEngine:
         ch = self.cfg.length.choices
         return _weighted(self.rng, [c.seconds for c in ch], [c.weight for c in ch])
 
-    def sample_ingredients(self) -> dict[str, str]:
+    def sample_ingredients(self, target_seconds: int = 30) -> dict[str, str]:
+        """Device, location and anomaly always; a twist sometimes; a structure only for longer Reels."""
         ing = self.cfg.ingredients
         recent = self.db.recent_ingredients(ing.cooldown_stories)
 
@@ -127,13 +128,16 @@ class StoryEngine:
             used = {r.get(key) for r in recent}
             return self.rng.choice([o for o in options if o not in used] or options)
 
-        return {
+        out = {
             "device": pick("device", [d.id for d in ing.device]),
             "location": pick("location", ing.location),
             "anomaly": pick("anomaly", ing.anomaly),
-            "structure": pick("structure", ing.structure),
-            "twist": pick("twist", ing.twist),
         }
+        if self.rng.random() < ing.twist_probability:
+            out["twist"] = pick("twist", ing.twist)
+        if target_seconds >= ing.structure_min_seconds and self.rng.random() < ing.structure_probability:
+            out["structure"] = pick("structure", ing.structure)
+        return out
 
     def eligible_topics(self) -> list[Topic]:
         year = datetime.now().year
@@ -200,23 +204,24 @@ class StoryEngine:
                                 f"write a real-case story on that basis")
         return [c.model_copy(update={"id": i}) for i, c in enumerate(ok, 1)], source
 
-    def choose_concept(self, concepts: list[Concept], category: str, recent_titles: list[str]
-                       ) -> tuple[Concept, float, np.ndarray, list[Concept], dict[str, int]]:
-        """Novel enough first (embedding similarity), then the critic's best-rated among those."""
+    def rank_concepts(self, concepts: list[Concept], category: str, recent_titles: list[str]
+                      ) -> tuple[list[tuple[Concept, float, np.ndarray]], dict[str, int]]:
+        """Concepts best-first: novel enough (embedding similarity) first, then by the critic's rating.
+
+        Returns ([(concept, similarity, embedding), ...], {title: rating})."""
         history = self.db.embeddings()
         vecs = self.embedder.embed([concept_text(c.title, c.logline, c.twist) for c in concepts])
         sims = [max_similarity(v, history) for v in vecs]
-        pool = [i for i in range(len(concepts)) if sims[i] <= self.cfg.novelty.max_similarity]
-        if not pool:
+        novel = {i for i in range(len(concepts)) if sims[i] <= self.cfg.novelty.max_similarity}
+        if not novel:
             self.log(f"  warning: every concept resembles a past story (best similarity {min(sims):.2f})")
-            pool = list(range(len(concepts)))
+            novel = set(range(len(concepts)))
         ratings = self.rate_concepts(concepts, category, recent_titles)
-        best = max(pool, key=lambda i: (ratings.get(i, -1), -sims[i]))
-        order = [best] + sorted((i for i in range(len(concepts)) if i != best), key=lambda i: -ratings.get(i, -1))
+        order = sorted(range(len(concepts)), key=lambda i: (i in novel, ratings.get(i, -1), -sims[i]), reverse=True)
         self.log("  concepts: " + "; ".join(f"'{concepts[i].title}' sim={sims[i]:.2f}"
                                             + (f" rating={ratings[i]}/40" if i in ratings else "") for i in order))
         named = {concepts[i].title: r for i, r in ratings.items()}
-        return concepts[best], round(sims[best], 3), vecs[best], [concepts[i] for i in order[1:]], named
+        return [(concepts[i], round(sims[i], 3), vecs[i]) for i in order], named
 
     def rate_concepts(self, concepts: list[Concept], category: str, recent_titles: list[str]) -> dict[int, int]:
         """{concept index: total rating} from the critic model; {} when skipped or failed."""
@@ -351,6 +356,8 @@ class StoryEngine:
     def polish(self, draft: StoryDraft, target: int, category: str, claims: list[Claim] | None,
                rounds: int = 2) -> None:
         """Deterministic fixes, then LLM rewrites of only the offending scenes and narration lines."""
+        if category == "real_mystery" and not draft.archive_entry.upper().startswith("RECONSTRUCTION"):
+            draft.archive_entry = f"RECONSTRUCTION - {draft.archive_entry}"   # never pose as real evidence
         for _ in range(rounds):
             fixes = auto_fix(draft, self.cfg, target)
             if fixes:
@@ -400,7 +407,7 @@ class StoryEngine:
         if category not in self.cfg.categories:
             raise ValueError(f"unknown category {category!r}; choose from {sorted(self.cfg.categories)}")
         target = target_seconds or self.pick_length()
-        ingredients = {} if category == "real_mystery" else self.sample_ingredients()
+        ingredients = {} if category == "real_mystery" else self.sample_ingredients(target)
         topic, claims, sources = None, None, []
         self.event_year = None
         if category == "real_mystery":
@@ -414,17 +421,35 @@ class StoryEngine:
         concepts, _ = self._gen(ConceptList, name="concepts", temperature=self.cfg.llm.temperature.concepts,
                                 max_tokens=2500, user=concepts_prompt(self.cfg, category, target, ingredients,
                                                                        recent_titles, topic, claims))
-        concept, similarity, vec, alternatives, ratings = self.choose_concept(concepts.concepts, category,
-                                                                              recent_titles)
-        self.log(f"  chosen: '{concept.title}' - {concept.logline}")
+        ranked, ratings = self.rank_concepts(concepts.concepts, category, recent_titles)
 
         devices = {d.id: f"{d.desc} (exists from {d.since})" for d in self.cfg.ingredients.device}
-        base = script_prompt(self.cfg, category, target, concept, ingredients, devices, claims)
-        draft, _ = self._gen(StoryDraft, user=base, name="script",
-                             temperature=self.cfg.llm.temperature.script, max_tokens=5000)
-        self.polish(draft, target, category, claims)
-        draft, critique, revised, history = self.improve(draft, self.critique(draft, category), base, target,
-                                                         category, claims)
+        n_drafts = 1 if self.is_local() else max(1, self.cfg.quality.drafts)
+        drafts = []   # (composite score, rank, concept, sim, vec, base prompt, draft, critique)
+        for rank, (cand, sim, cvec) in enumerate(ranked[:n_drafts]):
+            self.log(f"  draft {rank + 1}/{n_drafts}: '{cand.title}' - {cand.logline}")
+            base_c = script_prompt(self.cfg, category, target, cand, ingredients, devices, claims)
+            try:
+                d, _ = self._gen(StoryDraft, user=base_c, name=f"script-{rank + 1}",
+                                 temperature=self.cfg.llm.temperature.script, max_tokens=5000)
+            except LLMError as exc:
+                if drafts or rank + 1 < n_drafts:
+                    self.log(f"  draft {rank + 1} failed: {str(exc)[:200]}")
+                    continue
+                raise
+            self.polish(d, target, category, claims)
+            c = self.critique(d, category)
+            score = (self._avg(c) if c else 0.0) - 0.5 * len(self.checks(d, target, category, claims))
+            drafts.append((score, rank, cand, sim, cvec, base_c, d, c))
+            if c:
+                self.log(f"  draft {rank + 1} score {score:.2f} (critique avg {self._avg(c)})")
+        if not drafts:
+            raise LLMError("no draft could be written")
+        _, _, concept, similarity, vec, base, draft, first_critique = max(drafts, key=lambda x: (x[0], -x[1]))
+        alternatives = [c for c, _, _ in ranked if c is not concept]
+        if len(drafts) > 1:
+            self.log(f"  chosen: '{concept.title}'")
+        draft, critique, revised, history = self.improve(draft, first_critique, base, target, category, claims)
         fact_report: list[dict] = []
         if category == "real_mystery" and claims:
             fact_report = self.fact_check(draft, claims)

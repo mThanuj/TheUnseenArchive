@@ -70,6 +70,8 @@ class Concept(BaseModel):
     logline: str = Field(description="one sentence (max 35 words): who/what was recorded and what goes wrong")
     hook: str = Field(description="the first spoken line, max 12 words, starts mid-situation")
     twist: str = Field(description="the turn or revelation at the end, one sentence")
+    visual_hook: str = Field(description="what the viewer SEES in the first second that is already wrong")
+    rewatch_clue: str = Field(description="a visible detail planted early that the last line points back to")
     why_original: str = Field(description="one sentence: what makes this unlike typical horror shorts")
 
 

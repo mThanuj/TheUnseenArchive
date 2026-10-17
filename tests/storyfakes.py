@@ -59,11 +59,14 @@ RATINGS = {"ratings": [  # concept 2 ("Second Shift") rates best
 
 CONCEPTS = {"concepts": [
     {"title": "Room Nine", "logline": "A night clerk films an empty motel room that keeps changing.",
-     "hook": "The tape starts mid-step.", "twist": "The camera is not hers.", "why_original": "quiet"},
+     "hook": "The tape starts mid-step.", "twist": "The camera is not hers.", "why_original": "quiet",
+     "visual_hook": "a made bed in an empty room", "rewatch_clue": "a second camera in the mirror"},
     {"title": "Second Shift", "logline": "A guard notices the CCTV shows tomorrow.",
-     "hook": "Camera three shows a date that hasn't happened.", "twist": "He is on it.", "why_original": "time"},
+     "hook": "Camera three shows a date that hasn't happened.", "twist": "He is on it.", "why_original": "time",
+     "visual_hook": "the guard's chair is already empty", "rewatch_clue": "his own coat on the hook"},
     {"title": "Low Tide", "logline": "A ferry camera records a passenger who never boarded.",
-     "hook": "Nobody bought ticket forty.", "twist": "The ticket is his.", "why_original": "ferry"},
+     "hook": "Nobody bought ticket forty.", "twist": "The ticket is his.", "why_original": "ferry",
+     "visual_hook": "a wet seat on a dry deck", "rewatch_clue": "the seat number"},
 ]}
 
 

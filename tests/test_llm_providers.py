@@ -170,6 +170,7 @@ def test_critic_is_a_different_hosted_model(tmp_path, monkeypatch):
     local.name = "ollama"
     engine = StoryEngine(provider=FallbackProvider([writer, critic, local], log=lambda m: None),
                          db=StateDB(tmp_path / "t.db"), embedder=FakeEmbedder(), seed=5, log=lambda m: None)
+    engine.cfg.quality.drafts = 1
     record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
     assert writer.calls == ["ConceptList", "StoryDraft"] and local.calls == []
     assert critic.calls == ["ConceptRatings", "Critique"]   # the critic rates concepts and the script

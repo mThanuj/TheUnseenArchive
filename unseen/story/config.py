@@ -83,6 +83,9 @@ class Device(BaseModel):
 
 class Ingredients(BaseModel):
     cooldown_stories: int
+    twist_probability: float = 0.5
+    structure_probability: float = 0.3
+    structure_min_seconds: int = 40
     device: list[Device]
     location: list[str]
     anomaly: list[str]
@@ -114,7 +117,8 @@ class NoveltyCfg(BaseModel):
 
 class QualityCfg(BaseModel):
     rate_concepts: bool = True
-    revision_rounds: int = 2
+    drafts: int = 2
+    revision_rounds: int = 1
     target_avg_score: float = 7.5
 
 
