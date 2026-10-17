@@ -47,6 +47,7 @@ class KaggleJob:
     preset: str | None = None
     mode: str | None = None
     timeout_min: float | None = None
+    prompts: list[dict] | None = None    # [{id, seed, text}] instead of the benchmark prompts
 
 
 # ------------------------------------------------------------------ helpers

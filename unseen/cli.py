@@ -51,6 +51,14 @@ def parse_preset(text: str | None):
     return Preset(width=w, height=h, frames=f)
 
 
+def load_prompts_file(path: str):
+    """JSON or YAML list of {id, seed, text} -> [BenchPrompt]."""
+    from .config import BenchPrompt, load_yaml
+    p = Path(path)
+    data = json.loads(p.read_text(encoding="utf-8")) if p.suffix.lower() == ".json" else load_yaml(p)
+    return [BenchPrompt.model_validate(x) for x in data]
+
+
 def cmd_bench_video(args: argparse.Namespace) -> int:
     from .bench.compare import write_compare
     from .bench.video_bench import VideoBench
@@ -58,6 +66,8 @@ def cmd_bench_video(args: argparse.Namespace) -> int:
     bench = VideoBench(args.model)
     if args.timeout_min:
         bench.cfg.case_timeout_minutes = args.timeout_min
+    if args.prompts_file:
+        bench.cfg.prompts = load_prompts_file(args.prompts_file)
     out = bench.run(phases=phases, quick=args.quick, modes=args.mode, preset=args.preset)
     verdict = bench.results.get("verdict", {})
     compare = write_compare(bench.rt.path("bench_dir"))
@@ -137,35 +147,137 @@ def cmd_comfy_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_kaggle_bench(args: argparse.Namespace) -> int:
+def run_kaggle_job(model: str, *, phases: str, preset, mode: str | None, timeout_min: float | None,
+                   accelerator: str, timeout_hours: float, no_wait: bool,
+                   prompts: list[dict] | None = None) -> int:
     from .bench.compare import write_compare
     from .bench.video_bench import check_constraints
     from .cloud import kaggle as kg
     rt, manifest, cfg = load_runtime(), load_models(), load_bench()
-    if args.model not in cfg.models:
-        raise KeyError(f"unknown model {args.model!r}; choose from {sorted(cfg.models)}")
-    if args.preset and (problems := check_constraints(cfg.models[args.model], args.preset)):
+    if model not in cfg.models:
+        raise KeyError(f"unknown model {model!r}; choose from {sorted(cfg.models)}")
+    if preset and (problems := check_constraints(cfg.models[model], preset)):
         raise ValueError("invalid --preset: " + "; ".join(problems))
     kg.check_credentials()
     repo, commit = kg.local_commit()
     job = kg.KaggleJob(
-        model=args.model, model_set=kg.model_set_for(args.model, cfg, manifest),
-        repo_url=repo, commit=commit, phases=args.phases,
-        preset=args.preset.label.rstrip("f") if args.preset else None,
-        mode=args.mode, timeout_min=args.timeout_min)
-    print(f"Pushing Kaggle job ({args.accelerator}): model={job.model}, set={job.model_set}, "
-          f"phases={job.phases}, preset={job.preset or 'model default'}, commit={commit[:10]}")
-    kg.push(job, args.accelerator, args.timeout_hours)
+        model=model, model_set=kg.model_set_for(model, cfg, manifest), repo_url=repo, commit=commit,
+        phases=phases, preset=preset.label.rstrip("f") if preset else None, mode=mode,
+        timeout_min=timeout_min, prompts=prompts)
+    print(f"Pushing Kaggle job ({accelerator}): model={job.model}, set={job.model_set}, phases={job.phases}, "
+          f"preset={job.preset or 'model default'}, prompts={len(prompts) if prompts else 'benchmark'}, "
+          f"commit={commit[:10]}")
+    kg.push(job, accelerator, timeout_hours)
     print(f"Running as https://www.kaggle.com/code/{kg.kernel_ref()} (private). "
-          f"Setup + model download take ~10-15 min before the first clip.")
-    if args.no_wait:
+          f"Setup + model download take ~5-15 min before the first clip.")
+    if no_wait:
         print("Not waiting. Later: `uv run unseen kaggle-status` and `uv run unseen kaggle-fetch`.")
         return 0
-    state, message = kg.wait(args.timeout_hours)
+    kg.wait(timeout_hours)
     summary = kg.fetch(rt)
     print(kg.describe_summary(summary))
     print(f"Side-by-side clips: {write_compare(rt.path('bench_dir'))}")
     return 0 if summary.get("status") == "ok" else 1
+
+
+def cmd_kaggle_bench(args: argparse.Namespace) -> int:
+    prompts = None
+    if args.prompts_file:
+        prompts = [p.model_dump() for p in load_prompts_file(args.prompts_file)]
+    return run_kaggle_job(args.model, phases=args.phases, preset=args.preset, mode=args.mode,
+                          timeout_min=args.timeout_min, accelerator=args.accelerator,
+                          timeout_hours=args.timeout_hours, no_wait=args.no_wait, prompts=prompts)
+
+
+# ------------------------------------------------------------------ Milestone 2: stories
+
+def cmd_llm_setup(args: argparse.Namespace) -> int:
+    from pydantic import BaseModel
+    from .llm.base import generate
+    from .story.config import load_story_config
+    from .story.engine import make_provider
+    cfg = load_story_config()
+    provider = make_provider(cfg.llm, args.provider)
+    if provider.name == "ollama":
+        print(f"Ollama {provider.version()} at {provider.url}")
+        if provider.has_model():
+            print(f"Model present: {provider.model}")
+        else:
+            print(f"Pulling {provider.model} (~7 GB, one time) ...")
+            provider.pull()
+
+    class SpeedTest(BaseModel):
+        title: str
+        lines: list[str]
+
+    print("Speed test: a 4-line structured micro-story ...")
+    obj, stats, _ = generate(provider, SpeedTest, system="You write eerie, restrained micro-fiction. Answer in JSON.",
+                             user="Write a 4-line micro-story: the last log entry of a lighthouse keeper.",
+                             name="speed-test", temperature=0.7, max_tokens=400, max_retries=1)
+    print(f"\n{obj.title}\n  " + "\n  ".join(obj.lines))
+    print(f"\n{stats.output_tokens} tokens in {stats.seconds} s ({stats.tokens_per_s} tok/s incl. prompt "
+          f"processing and model load). A full story needs ~6-10k tokens across 3-4 calls.")
+    unload = getattr(provider, "unload", None)
+    if unload:
+        unload()
+    return 0
+
+
+def cmd_story_new(args: argparse.Namespace) -> int:
+    from .story.engine import StoryEngine
+    engine = StoryEngine(provider_name=args.provider, seed=args.seed)
+    record, out = engine.new_story(category=args.category, topic_id=args.topic, target_seconds=args.seconds)
+    print(f"\n{record.draft.title}  ({record.id})")
+    print(f"  {record.draft.logline}")
+    if record.critique:
+        print(f"  critique: {record.critique.scores()}{' -> revised' if record.revised else ''}")
+    if record.problems:
+        print("  unresolved checks:\n    - " + "\n    - ".join(record.problems))
+    print(f"\nRead it: {out / 'story.md'}\nRender its scenes: uv run unseen story render {record.id} --kaggle")
+    return 0
+
+
+def cmd_story_list(args: argparse.Namespace) -> int:
+    from .state.db import StateDB
+    rows = StateDB().recent(args.limit)
+    if not rows:
+        print("No stories yet. Create one: uv run unseen story new")
+    for r in rows:
+        print(f"{r['id']:52} {r['category']:22} {r['status']:20} critique={r['critique_avg']}  {r['title']}")
+    return 0
+
+
+def cmd_story_show(args: argparse.Namespace) -> int:
+    from .story.render import load_story, story_dir, to_markdown
+    record = load_story(args.id)
+    print(to_markdown(record))
+    print(f"(files: {story_dir(record.id)})")
+    return 0
+
+
+def cmd_story_render(args: argparse.Namespace) -> int:
+    """Generate the story's scenes as video clips (preview size by default) and show them in compare.html."""
+    from .bench.compare import write_compare
+    from .bench.video_bench import VideoBench
+    from .config import BenchPrompt, Preset
+    from .story.render import load_story, scene_prompts
+    record = load_story(args.id)
+    prompts = scene_prompts(record)
+    if args.scenes:
+        keep = {int(x) for x in args.scenes.split(",")}
+        prompts = [p for p, s in zip(prompts, record.draft.scenes) if s.id in keep]
+    preset = args.preset or Preset(width=512, height=768, frames=49)
+    model = args.model or ("ltxv13b_q8" if args.kaggle else "ltxv13b")
+    print(f"Rendering {len(prompts)} scene(s) of '{record.draft.title}' with {model} at {preset.label}")
+    if args.kaggle:
+        return run_kaggle_job(model, phases="quality", preset=preset, mode=args.mode, timeout_min=None,
+                              accelerator=args.accelerator, timeout_hours=args.timeout_hours,
+                              no_wait=args.no_wait, prompts=prompts)
+    bench = VideoBench(model)
+    bench.cfg.prompts = [BenchPrompt.model_validate(p) for p in prompts]
+    bench.run(phases=["quality"], preset=preset, modes=[args.mode] if args.mode else None)
+    print(f"Side-by-side clips: {write_compare(bench.rt.path('bench_dir'))}")
+    return 0
 
 
 def cmd_kaggle_status(args: argparse.Namespace) -> int:
@@ -224,6 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout-min", type=float, help="per-clip timeout override in minutes")
     p.add_argument("--preset", type=parse_preset,
                    help="WIDTHxHEIGHTxFRAMES for --quick or the quality phase, e.g. 704x1216x97")
+    p.add_argument("--prompts-file", help="JSON/YAML list of {id, seed, text} replacing the test prompts")
     p.set_defaults(func=cmd_bench_video)
 
     p = sub.add_parser("compare", help="write bench_results/compare.html with all clips side by side")
@@ -246,6 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout-hours", type=float, default=3.0, help="Kaggle session time limit")
     p.add_argument("--timeout-min", type=float, help="per-clip timeout inside the job")
     p.add_argument("--no-wait", action="store_true", help="push and return immediately")
+    p.add_argument("--prompts-file", help="JSON/YAML list of {id, seed, text} replacing the test prompts")
     p.set_defaults(func=cmd_kaggle_bench)
 
     p = sub.add_parser("kaggle-status", help="state of the Kaggle runner + your weekly GPU quota")
@@ -253,6 +367,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("kaggle-fetch", help="download the latest Kaggle run's results into bench_results")
     p.set_defaults(func=cmd_kaggle_fetch)
+
+    # ---- Milestone 2: stories
+    p = sub.add_parser("llm-setup", help="check the LLM provider, pull the model, measure speed")
+    p.add_argument("--provider", choices=["ollama", "gemini"], help="default: config/story.yaml")
+    p.set_defaults(func=cmd_llm_setup)
+
+    story = sub.add_parser("story", help="Milestone 2: write, list, show and render stories")
+    ssub = story.add_subparsers(dest="story_command", required=True)
+    p = ssub.add_parser("new", help="write a new story (research, concepts, script, critique)")
+    p.add_argument("--category", choices=["fiction_horror", "psychological_mystery", "real_mystery"])
+    p.add_argument("--topic", help="real_mystery topic id from config/topics.yaml")
+    p.add_argument("--seconds", type=int, help="target Reel length (default: varied)")
+    p.add_argument("--provider", choices=["ollama", "gemini"], help="default: config/story.yaml")
+    p.add_argument("--seed", type=int, help="random seed for category/ingredient choices")
+    p.set_defaults(func=cmd_story_new)
+    p = ssub.add_parser("list", help="recent stories")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=cmd_story_list)
+    p = ssub.add_parser("show", help="print a story's script, scenes, claims and sources")
+    p.add_argument("id", help="story id (or a unique prefix)")
+    p.set_defaults(func=cmd_story_show)
+    p = ssub.add_parser("render", help="generate a story's scenes as clips (preview size) -> compare.html")
+    p.add_argument("id", help="story id (or a unique prefix)")
+    p.add_argument("--kaggle", action="store_true", help="render on Kaggle (default model ltxv13b_q8)")
+    p.add_argument("--model", choices=models, help="default: ltxv13b_q8 on Kaggle, ltxv13b locally")
+    p.add_argument("--preset", type=parse_preset, help="default 512x768x49 (fast preview)")
+    p.add_argument("--scenes", help="comma-separated scene numbers to render (default: all)")
+    p.add_argument("--mode", help="ComfyUI memory mode, e.g. dynamic_fp16 on Kaggle")
+    p.add_argument("--accelerator", default="NvidiaTeslaT4")
+    p.add_argument("--timeout-hours", type=float, default=4.0)
+    p.add_argument("--no-wait", action="store_true")
+    p.set_defaults(func=cmd_story_render)
 
     p = sub.add_parser("export-workflow", help="write a model's API-format workflow JSON")
     p.add_argument("--model", required=True, choices=models)

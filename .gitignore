@@ -5,17 +5,17 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
-# Heavy local runtime: ComfyUI checkout, its venv, model weights
-runtime/
-models/
+# Heavy local runtime: ComfyUI checkout, its venv, model weights (repo-root only)
+/runtime/
+/models/
 
 # Generated output: never committed (paste report.md into the conversation instead)
-bench_results/
-runs/
-output/
-state/
-logs/
-cache/
+/bench_results/
+/runs/
+/output/
+/state/
+/logs/
+/cache/
 *.log
 
 # Secrets

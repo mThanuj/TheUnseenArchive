@@ -11,7 +11,7 @@ verified on the target machine before the next one starts.
 | Milestone | Scope | Status |
 |---|---|---|
 | **M1** | Generate real AI video clips and measure memory, time, motion, output | **Done**: LTX-Video 13B Q8 on Kaggle T4 (704x1216, 4 s, 18 min/clip); LTX 13B Q3 locally as fallback |
-| M2 | Story engine: concepts, research with sources, scene breakdown (local LLM) | Not started |
+| M2 | Story engine: concepts, research with sources, scene breakdown (local LLM) | **Implemented, awaiting first run on Windows** |
 | M3 | Narration (Kokoro TTS) and procedural soundscape | Not started |
 | M4 | Assembly, found-footage looks, subtitles, 1080x1920 encode, validation | Not started |
 | M5 | Daily orchestration: resumable stages, retries, Task Scheduler (Asia/Kolkata) | Not started |
@@ -25,6 +25,35 @@ Design decisions, research evidence, licenses and open risks: [docs/decisions.md
 Windows 11, NVIDIA RTX 3050 Laptop GPU (4 GB VRAM), 16 GB RAM, Intel i5-12450H.
 Needs: NVIDIA driver supporting **CUDA 13.0+** (check the top-right of `nvidia-smi`), Git, FFmpeg,
 about **30 GB free disk**, and internet for the first setup.
+
+## Milestone 2: story engine
+
+Writes one complete Reel script per run: category rotation, varied ingredients with cooldowns,
+5 candidate concepts filtered for similarity to every past story, a structured script (narration
+lines with pauses, scenes with visual/motion/camera/lighting/continuity, sound cues, camera overlay
+text, and a ready-to-render video prompt per scene), an editor critique, and one revision if needed.
+
+Real-world mysteries are researched on Wikipedia: the model extracts claims with verbatim quotes,
+quotes not found in the source are rejected, narration may only use the remaining claims, and
+theories/legends must be hedged. Sources (URL, revision, license) are stored with the story.
+
+```powershell
+winget install Ollama.Ollama                     # local LLM runtime (runs in the background)
+git pull; uv sync
+uv run pytest
+uv run unseen llm-setup                          # pulls Gemma 4 12B (~7 GB, Apache-2.0) and measures speed
+uv run unseen story new                          # random category (~10-25 min on CPU)
+uv run unseen story new --category real_mystery  # or --topic max_headroom (see config/topics.yaml)
+uv run unseen story list
+uv run unseen story show <id>                    # same as runs\stories\<id>\story.md
+uv run unseen story render <id> --kaggle         # renders every scene at 512x768x49 (preview) on Kaggle
+```
+
+Optional: a free Gemini API key (`GEMINI_API_KEY` in `.env`) enables `--provider gemini` for
+comparison. Free-tier limits and data-use terms are Google's and may change.
+
+Outputs per story in `runs\stories\<id>\`: `story.md` (read this), `story.json` (full record),
+`prompts.json` (scene video prompts). State is kept in `state\unseen.db`.
 
 ## Milestone 1: first genuine AI video clip
 

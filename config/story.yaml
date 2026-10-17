@@ -1,0 +1,135 @@
+# Story engine (Milestone 2). Everything creative that should be tunable without code changes.
+
+llm:
+  provider: ollama                  # ollama (local, default) | gemini (optional hosted free tier)
+  ollama:
+    url: http://127.0.0.1:11434
+    # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
+    model: hf.co/google/gemma-4-12B-it-qat-q4_0-gguf
+    num_ctx: 8192
+    timeout_s: 2400                 # CPU generation of a full script can take several minutes
+  gemini:
+    url: https://generativelanguage.googleapis.com/v1beta
+    model: gemini-2.5-flash         # free-tier model name; check https://ai.google.dev/gemini-api/docs/models
+    timeout_s: 300
+  temperature:
+    concepts: 1.0
+    script: 0.8
+    critique: 0.2
+  max_retries: 2                    # re-ask with the validation errors when output is invalid
+
+brand:
+  name: The Unseen Archive
+  tagline: Some stories should never be forgotten.
+  narrator: >-
+    The Archivist: a calm, precise, slightly weary voice cataloguing recordings that were never
+    meant to be seen. Speaks in short, concrete sentences. Never melodramatic, never explains the
+    horror; lets details and silences do the work. Opens each entry like a catalogue record
+    (entry number, device, where it was recovered) and closes with a single line that lingers.
+
+categories:                         # weights for daily rotation; never the same category 3 days running
+  fiction_horror: {weight: 0.45, label: "Fictional horror"}
+  psychological_mystery: {weight: 0.30, label: "Psychological mystery"}
+  real_mystery: {weight: 0.25, label: "Documented real-world mystery"}
+
+length:                             # varied on purpose; seconds of finished Reel
+  choices: [{seconds: 20, weight: 1}, {seconds: 30, weight: 3}, {seconds: 40, weight: 2}, {seconds: 50, weight: 1}]
+  words_per_second: 2.3             # slow, suspenseful narration including pauses
+  scene_seconds: {min: 2.0, max: 5.0, typical: 4.0}
+  max_scenes: 10
+
+# Ingredients are sampled per story (and cooled down for a few days) to force variety.
+ingredients:
+  cooldown_stories: 5
+  device:
+    - {id: camcorder, desc: "early-2000s handheld camcorder"}
+    - {id: cctv, desc: "fixed high-angle security camera"}
+    - {id: night_vision, desc: "handheld night-vision camera"}
+    - {id: phone, desc: "smartphone held vertically"}
+    - {id: bodycam, desc: "chest-mounted body camera"}
+    - {id: dashcam, desc: "car dashboard camera"}
+    - {id: trail_cam, desc: "motion-triggered trail camera in the woods"}
+    - {id: webcam, desc: "laptop webcam in a dark room"}
+    - {id: film_8mm, desc: "silent 8mm home-movie film"}
+  location:
+    - abandoned hospital wing
+    - flooded basement
+    - rural motel corridor
+    - closed shopping mall at night
+    - forest service road
+    - lighthouse interior
+    - empty school gymnasium
+    - apartment stairwell
+    - farmhouse kitchen
+    - underground parking garage
+    - frozen lake at dusk
+    - hotel room at 3 a.m.
+    - night train carriage
+    - cornfield edge
+    - storm drain tunnel
+    - children's ward playroom (no children present)
+    - radio station control room
+    - ferry deck in fog
+  anomaly:
+    - a figure that is closer every time the camera looks back
+    - a door that is open in one shot and bricked up in the next
+    - a sound that arrives before its source
+    - the recording contains footage of the person watching it
+    - something mimics the camera operator's voice
+    - lights moving in a pattern no one can explain
+    - a room that is larger inside than outside
+    - every clock in the footage shows the same wrong time
+    - a person in the background never moves while everything else does
+    - footprints appearing in fresh snow with no one there
+    - the camera keeps recording after its battery is removed
+    - a missing minute that the timestamp skips
+  structure:
+    - single continuous recording that gets worse
+    - three tapes found in the wrong order
+    - before and after the same place, years apart
+    - the archivist notices something on the second viewing
+    - two cameras that disagree about what happened
+    - a log of increasingly short entries
+  twist:
+    - the watcher is being watched
+    - the timeline is reversed
+    - the "victim" made the recording afterwards
+    - the safe place was the source all along
+    - the explanation is mundane, but one detail is not
+    - the archive itself appears in the footage
+
+rules:
+  min_critique_score: 7             # any dimension below this triggers one revision pass
+  hook_max_words: 12
+  narration_line_max_words: 22
+  banned_cliches:
+    - it was all a dream
+    - the narrator was dead all along
+    - ouija board
+    - demonic possession
+    - jump scare in a mirror
+    - "or is it?"
+    - little did they know
+    - a chill ran down
+    - blood dripping from the walls
+  # Phrases flagged in video prompts (whole-word match): small video models render them as
+  # artefacts or unreadable text. Degradation is added in post-production instead (M4).
+  video_prompt_banned_words: [noise, noisy, grain, grainy, film grain, vhs, glitch, glitchy, tv static,
+                              static noise, low-resolution, low resolution, pixelated, artifacts, text,
+                              subtitles, caption, watermark, logo, letters, sign that reads, gore, blood]
+  video_prompt_words: {min: 45, max: 130}
+  content_limits: >-
+    Suspense, dread and implication over shock. No gore, no harm to children or animals shown,
+    no sexual content, no real living private individuals, no real brands, no slurs, no
+    self-harm. Real places may be named only for documented real-world cases.
+
+novelty:
+  max_similarity: 0.86              # cosine similarity to any past story above this = too similar
+  recent_titles_in_prompt: 12       # shown to the model as "do not repeat"
+
+real_mystery:
+  min_years_ago_sensitive: 40       # cases where people died or vanished must be historical
+  max_source_chars: 9000            # how much article text the model reads (CPU speed)
+  hedge_words: [reportedly, according to, allegedly, some believe, some say, claimed, is said to,
+                legend, theory, theorists, may have, might have, possibly, perhaps, accounts,
+                rumoured, rumored, supposedly, witnesses said, never confirmed]

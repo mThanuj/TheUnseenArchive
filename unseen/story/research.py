@@ -1,0 +1,71 @@
+"""Fetch source material for real-world mysteries from Wikipedia (MediaWiki Action API).
+
+Follows Wikimedia's API etiquette (descriptive User-Agent, one request per article). Text is
+CC BY-SA 4.0: the engine paraphrases facts, never copies prose into narration, and keeps the
+article URL, revision id and license with every story for attribution.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import httpx
+
+from .models import Source
+
+API = "https://en.wikipedia.org/w/api.php"
+USER_AGENT = ("TheUnseenArchive/0.1 (https://github.com/mThanuj/TheUnseenArchive; "
+              "research for an AI-disclosed storytelling channel)")
+LICENSE = "CC BY-SA 4.0 (Wikipedia)"
+
+
+class ResearchError(RuntimeError):
+    pass
+
+
+def parse_article(data: dict) -> tuple[str, Source]:
+    """(plain text, Source) from a formatversion=2 `action=query` response."""
+    pages = (data.get("query") or {}).get("pages") or []
+    if not pages or pages[0].get("missing") or pages[0].get("invalid"):
+        raise ResearchError(f"Wikipedia article not found: {data}")
+    p = pages[0]
+    text = p.get("extract") or ""
+    if len(text) < 500:
+        raise ResearchError(f"Wikipedia article '{p.get('title')}' has too little text ({len(text)} chars)")
+    rev = (p.get("revisions") or [{}])[0]
+    src = Source(
+        title=f"Wikipedia: {p.get('title')}",
+        url=p.get("fullurl") or f"https://en.wikipedia.org/wiki/{p.get('title', '').replace(' ', '_')}",
+        license=LICENSE,
+        revision_id=rev.get("revid"),
+        retrieved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        external_links=[e.get("url", "") for e in (p.get("extlinks") or [])][:40],
+    )
+    return text, src
+
+
+def fetch_article(title: str, timeout: float = 30) -> tuple[str, Source]:
+    params = {
+        "action": "query", "format": "json", "formatversion": "2", "redirects": "1",
+        "titles": title, "prop": "extracts|info|extlinks|revisions",
+        "explaintext": "1", "exsectionformat": "plain", "inprop": "url",
+        "ellimit": "max", "rvprop": "ids|timestamp",
+    }
+    try:
+        r = httpx.get(API, params=params, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ResearchError(f"Wikipedia request failed for '{title}': {exc!r}") from None
+    return parse_article(r.json())
+
+
+def trim_source(text: str, max_chars: int) -> str:
+    """Keep the lead and early sections, cut at a paragraph boundary, drop reference tails."""
+    for tail in ("\nSee also\n", "\nReferences\n", "\nFurther reading\n", "\nExternal links\n", "\nNotes\n"):
+        i = text.find(tail)
+        if i > 0:
+            text = text[:i]
+    if len(text) <= max_chars:
+        return text
+    cut = text.rfind("\n", 0, max_chars)
+    return text[:cut if cut > max_chars // 2 else max_chars]

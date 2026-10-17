@@ -156,3 +156,25 @@ and a moving object scores high. Thresholds are provisional until calibrated on 
 4. Windows "GPU Adapter Memory" counters may be missing or localized (spill detection then reports "not measured").
 5. Kaggle quota/ToS, Gemini free-tier limits, all Instagram API details, Instagram loudness targets.
 6. Laptop sleep/battery behaviour with Task Scheduler wake timers (M5).
+
+## M2 design (2026-10-17): story engine
+
+- **LLM:** Ollama + `hf.co/google/gemma-4-12B-it-qat-q4_0-gguf` (Google's official QAT 4-bit build,
+  Apache-2.0, ungated; V via HF API). Ollama supports Gemma 4 (V, release notes) and JSON-schema
+  `format` output (V, docs/api.md). Runs on the laptop CPU/GPU before any video work; the model is
+  unloaded afterwards (`keep_alive: 0`). Speed on the i5-12450H is measured by `unseen llm-setup` (U).
+  Gemini free tier is an optional comparison provider, never required.
+- **Structure:** pydantic models are the JSON schemas the model fills; deterministic validators
+  (timing vs. target length at 2.3 words/s, every narration line in exactly one scene, hook <= 12
+  words, video-prompt length and banned artefact words, cliches) feed problems back for a fix.
+  An editor critique (7 dimensions, 1-10) triggers one revision when any score is below 7.
+- **Variety:** weighted category rotation (never 3 in a row), length mix 20-50 s, ingredient pools
+  (device, location, anomaly, structure, twist) with a 5-story cooldown, 5 concepts per story, and
+  the concept least similar to all past stories (bge-small-en-v1.5 embeddings, MIT) is chosen.
+- **Real mysteries:** curated historical topics only (cases involving deaths/disappearances must be
+  40+ years old); Wikipedia text via the MediaWiki API; claims need verbatim quotes that are
+  checked against the source (punctuation-insensitive); theory/legend/disputed claims must be
+  hedged; sources keep URL, revision id and CC BY-SA license; captions disclose "dramatized
+  reconstruction, AI-generated". Single-source (Wikipedia) for now; multi-source corroboration is a
+  later improvement.
+- **Brand device:** every story is an archive entry narrated by "the Archivist".

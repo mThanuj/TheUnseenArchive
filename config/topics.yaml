@@ -1,0 +1,37 @@
+# Documented real-world mysteries the engine may research (Milestone 2).
+# Curated on purpose: historical (40+ years), well documented on Wikipedia, and not centred on the
+# suffering of identifiable recent victims. `wikipedia` is the exact English Wikipedia title.
+# sensitivity: low = phenomena/objects/folklore; medium = people died or vanished long ago
+# (handle with restraint: no speculation about named individuals' character or guilt).
+
+topics:
+  - {id: mary_celeste, wikipedia: "Mary Celeste", year: 1872, kind: ghost ship, sensitivity: medium}
+  - {id: flannan_isles, wikipedia: "Flannan Isles Lighthouse", year: 1900, kind: disappearance, sensitivity: medium}
+  - {id: carroll_deering, wikipedia: "Carroll A. Deering", year: 1921, kind: ghost ship, sensitivity: medium}
+  - {id: ss_baychimo, wikipedia: "SS Baychimo", year: 1931, kind: ghost ship, sensitivity: low}
+  - {id: max_headroom, wikipedia: "Max Headroom signal hijacking", year: 1987, kind: broadcast intrusion, sensitivity: low}
+  - {id: uvb76, wikipedia: "UVB-76", year: 1976, kind: radio signal, sensitivity: low}
+  - {id: wow_signal, wikipedia: "Wow! signal", year: 1977, kind: radio signal, sensitivity: low}
+  - {id: taos_hum, wikipedia: "Taos Hum", year: 1991, kind: sound phenomenon, sensitivity: low}
+  - {id: the_hum, wikipedia: "The Hum", year: 1970, kind: sound phenomenon, sensitivity: low}
+  - {id: hessdalen, wikipedia: "Hessdalen lights", year: 1981, kind: light phenomenon, sensitivity: low}
+  - {id: marfa_lights, wikipedia: "Marfa lights", year: 1883, kind: light phenomenon, sensitivity: low}
+  - {id: tunguska, wikipedia: "Tunguska event", year: 1908, kind: explosion, sensitivity: low}
+  - {id: dancing_plague, wikipedia: "Dancing plague of 1518", year: 1518, kind: mass behaviour, sensitivity: low}
+  - {id: oakville_blobs, wikipedia: "Oakville blobs", year: 1994, kind: unexplained substance, sensitivity: low}
+  - {id: kentucky_meat, wikipedia: "Kentucky meat shower", year: 1876, kind: unexplained fall, sensitivity: low}
+  - {id: toynbee_tiles, wikipedia: "Toynbee tiles", year: 1980, kind: anonymous messages, sensitivity: low}
+  - {id: voynich, wikipedia: "Voynich manuscript", year: 1404, kind: artifact, sensitivity: low}
+  - {id: roanoke, wikipedia: "Roanoke Colony", year: 1590, kind: disappearance, sensitivity: low}
+  - {id: woolpit, wikipedia: "Green children of Woolpit", year: 1150, kind: folklore, sensitivity: low}
+  - {id: chase_vault, wikipedia: "Chase Vault", year: 1819, kind: folklore, sensitivity: low}
+  - {id: gef, wikipedia: "Gef (mongoose)", year: 1931, kind: folklore, sensitivity: low}
+  - {id: solway_spaceman, wikipedia: "Solway Firth Spaceman", year: 1964, kind: photograph, sensitivity: low}
+  - {id: rendlesham, wikipedia: "Rendlesham Forest incident", year: 1980, kind: sighting, sensitivity: low}
+  - {id: kecksburg, wikipedia: "Kecksburg UFO incident", year: 1965, kind: sighting, sensitivity: low}
+  - {id: dover_demon, wikipedia: "Dover Demon", year: 1977, kind: folklore, sensitivity: low}
+  - {id: mothman, wikipedia: "Mothman", year: 1966, kind: folklore, sensitivity: low}
+  - {id: oak_island, wikipedia: "Oak Island mystery", year: 1795, kind: treasure, sensitivity: low}
+  - {id: bennington, wikipedia: "Bennington Triangle", year: 1945, kind: disappearance, sensitivity: medium}
+  - {id: dyatlov, wikipedia: "Dyatlov Pass incident", year: 1959, kind: deaths, sensitivity: medium}
+  - {id: valentich, wikipedia: "Disappearance of Frederick Valentich", year: 1978, kind: disappearance, sensitivity: medium}

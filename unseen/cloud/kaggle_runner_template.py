@@ -143,6 +143,10 @@ def bench():
         args += ["--mode", JOB["mode"]]
     if JOB.get("timeout_min"):
         args += ["--timeout-min", str(JOB["timeout_min"])]
+    if JOB.get("prompts"):
+        prompts_file = ROOT / "prompts.json"
+        prompts_file.write_text(json.dumps(JOB["prompts"]), encoding="utf-8")
+        args += ["--prompts-file", str(prompts_file)]
     unseen(*args)
 
 
