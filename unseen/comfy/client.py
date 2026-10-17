@@ -128,7 +128,8 @@ class EventRecorder(threading.Thread):
     def run(self) -> None:
         from websockets.sync.client import connect
         try:
-            with connect(self.ws_url, open_timeout=10, max_size=None) as ws:
+            # ping_interval=None: ComfyUI can be too busy to answer keepalive pings mid-generation
+            with connect(self.ws_url, open_timeout=10, max_size=None, ping_interval=None) as ws:
                 self._connected.set()
                 while not self._halt.is_set():
                     try:

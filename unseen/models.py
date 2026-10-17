@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import ModelsManifest, RuntimeConfig
+from .fsutil import move_with_retry
 
 Log = Callable[[str], None]
 
@@ -59,7 +60,7 @@ def fetch_file(manifest: ModelsManifest, rt: RuntimeConfig, key: str, log: Log =
         downloaded = Path(hf_hub_download(repo_id=f.repo, filename=f.path, local_dir=staging))
         if dest.exists():
             dest.unlink()
-        shutil.move(str(downloaded), str(dest))
+        move_with_retry(downloaded, dest)
 
     log(f"  verify   {key} (sha256, may take a minute)")
     digest = sha256_file(dest)

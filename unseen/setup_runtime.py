@@ -39,22 +39,24 @@ def git_head(path: Path) -> str | None:
 
 
 def ensure_checkout(repo: str, commit: str, dest: Path, log: Log) -> None:
-    fresh = False
+    """Make `dest` a detached checkout of `commit`, cloning (blobless) if needed."""
     if not (dest / ".git").is_dir():
         if dest.exists() and any(dest.iterdir()):
             raise RuntimeError(f"{dest} exists but is not a git checkout; move it away and re-run")
         dest.parent.mkdir(parents=True, exist_ok=True)
         _run(["git", "clone", "--filter=blob:none", "--no-checkout", repo, str(dest)], log)
-        fresh = True
-    if not fresh and git_head(dest) == commit:
+    # Nothing checked out yet = fresh (or interrupted) --no-checkout clone; git status would
+    # report every file as deleted, so only check for local edits in a real working tree.
+    checked_out = any(p.name != ".git" for p in dest.iterdir())
+    if checked_out and git_head(dest) == commit:
         log(f"  ok: {dest.name} at {commit[:10]}")
         return
-    if not fresh:
+    if checked_out:
         dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=dest,
                                capture_output=True, text=True).stdout.strip()
         if dirty:
             raise RuntimeError(f"{dest} has local modifications; refusing to switch it to {commit[:10]}")
-        _run(["git", "fetch", "--filter=blob:none", "origin", commit], log, cwd=dest)
+    _run(["git", "fetch", "--filter=blob:none", "origin", commit], log, cwd=dest)
     _run(["git", "-c", "advice.detachedHead=false", "checkout", "--detach", commit], log, cwd=dest)
     log(f"  ok: {dest.name} at {commit[:10]}")
 

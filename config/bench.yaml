@@ -113,7 +113,7 @@ models:
       - {width: 448, height: 800, frames: 73}
       - {width: 576, height: 1024, frames: 49}
     floor:
-      - {width: 352, height: 640, frames: 33}
+      - {width: 352, height: 640, frames: 49}
 
 vae_tiling:                       # VAE decode is the usual OOM point on 4 GB; always decode tiled
   tile_size: 256

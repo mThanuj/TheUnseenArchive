@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import json
 import platform
-import shutil
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
 import psutil
 
 from .. import media
@@ -27,6 +27,7 @@ from ..comfy.client import ComfyClient, ComfyError
 from ..comfy.server import ComfyServer, ComfyStartupError
 from ..config import (BenchConfig, BenchModel, BenchPrompt, Gate, ModelsManifest, Preset,
                       RuntimeConfig, load_bench, load_models, load_runtime)
+from ..fsutil import move_with_retry
 from ..models import is_verified
 from .metrics import contact_sheet, load_frames, motion_metrics
 from .monitor import ResourceMonitor
@@ -246,6 +247,7 @@ class VideoBench:
             result["validation_warnings"] = warnings
         if errors:
             result.update(status="invalid", error="\n".join(errors))
+            result["gate"] = evaluate_gate(result, self.cfg.gate)
             return result
 
         recorder = client.recorder()
@@ -260,6 +262,8 @@ class VideoBench:
             result["status"] = "ok"
         except ComfyError as exc:
             result.update(status=exc.kind, error=str(exc))
+        except httpx.HTTPError as exc:  # server stopped responding mid-run
+            result.update(status="error", error=f"HTTP error talking to ComfyUI: {exc!r}")
         finally:
             t1 = time.monotonic()
             result["resources"] = monitor.stop()
@@ -290,7 +294,7 @@ class VideoBench:
         for i, img in enumerate(images, 1):
             src = out_root / (img.get("subfolder") or "") / img["filename"]
             dst = frames_dir / f"frame_{i:05d}.png"
-            shutil.move(str(src), str(dst))
+            move_with_retry(src, dst)
             paths.append(dst)
         mp4 = media.encode_frames(frames_dir, self.model.fps, case_dir / f"{case_dir.name}.mp4")
         result["output"] = media.probe(mp4)
@@ -436,7 +440,8 @@ class VideoBench:
                     probe_best = self.phase_probe(self.cfg.fallback_memory_modes)
                 if probe_best is not None:
                     mode = probe_best["memory_mode"]
-                quick_failed = probe_best is None
+                # a quick clip that works but blows the time gate means: go smaller, not bigger
+                quick_failed = probe_best is None or not probe_best["gate"]["within_time"]
             preset = None if quick_failed else self.model.quick
             if "ladder" in phases:
                 preset = self.phase_ladder(mode, probe_best, quick_failed)

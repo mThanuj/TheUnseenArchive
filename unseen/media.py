@@ -20,27 +20,33 @@ def require(tool: str) -> str:
     return exe
 
 
+def _run(cmd: list[str]) -> str:
+    try:
+        return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"{Path(cmd[0]).name} failed (exit {exc.returncode}): "
+                           f"{(exc.stderr or '').strip()[-1500:]}") from None
+
+
 def encode_frames(frames_dir: Path, fps: float, out_path: Path, crf: int = 14) -> Path:
     """Encode frame_00001.png, frame_00002.png, ... into a near-lossless H.264 MP4."""
-    cmd = [
+    _run([
         require("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-framerate", f"{fps:g}",
         "-i", str(frames_dir / "frame_%05d.png"),
         "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         str(out_path),
-    ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    ])
     return out_path
 
 
 def probe(path: Path) -> dict:
     """Return the key properties of the first video stream."""
-    cmd = [
+    out = _run([
         require("ffprobe"), "-v", "error", "-print_format", "json",
         "-show_format", "-show_streams", "-count_frames", str(path),
-    ]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    ])
     data = json.loads(out)
     video = next(s for s in data["streams"] if s.get("codec_type") == "video")
     fps = float(Fraction(video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1"))
