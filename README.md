@@ -20,6 +20,17 @@ verified on the target machine before the next one starts.
 
 Design decisions, research evidence, licenses and open risks: [docs/decisions.md](docs/decisions.md).
 
+## Each round: one script, one report
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_this.ps1
+```
+
+`run_this.ps1` pulls the latest code (restarting itself if it changed), runs this round's steps,
+and writes `run_logs\<timestamp>\REPORT.md` (commit, machine, configured key *names*, each step's
+exit code/duration/output, plus any new story.md / benchmark report). The report is copied to the
+clipboard: paste it into the chat. `-Only name1,name2` runs a subset of the steps.
+
 ## Target machine
 
 Windows 11, NVIDIA RTX 3050 Laptop GPU (4 GB VRAM), 16 GB RAM, Intel i5-12450H.

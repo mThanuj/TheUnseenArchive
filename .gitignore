@@ -11,6 +11,7 @@ __pycache__/
 
 # Generated output: never committed (paste report.md into the conversation instead)
 /bench_results/
+/run_logs/
 /runs/
 /output/
 /state/
