@@ -28,6 +28,10 @@ comfyui:
     classic: [--disable-dynamic-vram]
     classic_lowvram: [--disable-dynamic-vram, --lowvram]
     classic_novram: [--disable-dynamic-vram, --novram]
+    # Speed experiment for GPUs without bf16 (Kaggle T4): ComfyUI runs LTX only in bf16/fp32, so
+    # on a T4 it falls back to slow fp32. --fp16-unet forces fp16 (tensor cores, ~4-8x faster)
+    # but LTX may overflow in fp16 (black/garbled frames). Test before relying on it.
+    dynamic_fp16: [--fp16-unet]
 
 custom_nodes:
   - name: ComfyUI-GGUF

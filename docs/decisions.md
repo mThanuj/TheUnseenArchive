@@ -91,6 +91,24 @@ if clearly better, used for production with the laptop as fallback.
 - Unverified: weekly GPU hours, Kaggle's terms on automated use and on running ComfyUI (kaggle.com
   was unreachable from the authoring machine), session disk size, driver CUDA version.
 
+## M1 decision (2026-10-17): LTX-Video 13B 0.9.8 distilled Q8 on Kaggle, local Q3 as fallback
+
+First Kaggle run (T4, driver 580.178 / CUDA 13.0, 31 GB RAM, 2 vCPU, cu130 PyTorch worked):
+setup 5.5 min (ComfyUI 112 s, 21.6 GB models 212 s); 704x1216x97 (4.0 s @ 24 fps) in
+**18.0-18.3 min/clip**: 8 steps at ~123 s/step (fp32, as predicted) + ~70 s VAE decode; peak VRAM
+13.0-13.8 of 15.4 GB; all 3 cases passed the gate (local motion p98 0.66-31). The user judged it
+the best-looking of all candidates.
+
+Chosen production path: **LTX 13B Q8 on Kaggle** (primary), **LTX 13B Q3 on the laptop** (fallback
+when Kaggle is unavailable or out of quota; 1.8 min per 2 s clip at 512x768).
+
+Budget: a Reel needs ~8-10 scene clips of 3-4 s, i.e. ~2.5-3 h of single-T4 time per day at
+current speed. To be validated against the account's weekly quota (`unseen kaggle-status`).
+Planned speed-ups, cheapest first: (1) `--mode dynamic_fp16` (fp16 on the T4's tensor cores; may
+break LTX), (2) the L4 accelerator if the account has it (bf16), (3) both T4s in parallel
+(two ComfyUI processes; the session has two GPUs and quota is per session), (4) Q6_K (10.9 GB)
+so the model fits in T4 VRAM without streaming.
+
 **Proving "genuine motion".** `unseen/bench/metrics.py` computes optical flow between frames and
 removes the best-fit global zoom/pan/rotation; what remains ("local motion") cannot be produced by
 a Ken Burns move over a still image. Unit tests check that a synthetic Ken Burns clip scores low

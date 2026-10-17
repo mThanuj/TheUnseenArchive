@@ -10,7 +10,7 @@ verified on the target machine before the next one starts.
 
 | Milestone | Scope | Status |
 |---|---|---|
-| **M1** | Generate real AI video clips on the RTX 3050 (4 GB) and measure memory, time, motion, output | **First clip works (36 s/clip, LTX 2B); round 2: quality tuning + model shootout** |
+| **M1** | Generate real AI video clips and measure memory, time, motion, output | **Done**: LTX-Video 13B Q8 on Kaggle T4 (704x1216, 4 s, 18 min/clip); LTX 13B Q3 locally as fallback |
 | M2 | Story engine: concepts, research with sources, scene breakdown (local LLM) | Not started |
 | M3 | Narration (Kokoro TTS) and procedural soundscape | Not started |
 | M4 | Assembly, found-footage looks, subtitles, 1080x1920 encode, validation | Not started |
