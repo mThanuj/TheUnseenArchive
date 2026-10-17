@@ -39,12 +39,18 @@ def load_dotenv(path: Path | None = None) -> None:
 
 # ---------------------------------------------------------------- runtime.yaml
 
+class TorchIndex(BaseModel):
+    min_cuda: str
+    url: str
+
+
 class ComfyUISettings(BaseModel):
     repo: str
     ref: str
     commit: str
     python: str
     torch_index_url: str
+    torch_index_by_driver: list[TorchIndex] = Field(default_factory=list)
     min_driver_cuda: str
     host: str = "127.0.0.1"
     port: int = 8188

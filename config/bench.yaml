@@ -131,6 +131,47 @@ models:
       - {width: 704, height: 1216, frames: 97}
     floor:
       - {width: 384, height: 640, frames: 49}
+  # ---- Cloud models (run with `unseen kaggle-bench`; too big for 16 GB RAM locally) ----
+  ltxv13b_q8:
+    label: LTX-Video 13B 0.9.8 distilled (GGUF Q8_0) - cloud
+    workflow: ltxv_t2v
+    files: {diffusion: ltxv_13b_098_distilled_q8, text_encoder: t5xxl_q8, vae: ltxv_13b_098_vae}
+    fps: 24
+    steps: 8
+    cfg: 1.0
+    sampler: euler_ancestral
+    negative_prompt: *ltx_negative
+    constraints: {dim_multiple: 32, frame_step: 8}
+    variants:
+      - {name: official, sigmas: *ltx_distilled_sigmas}
+    quick: {width: 704, height: 1216, frames: 97}      # near-native, 4 s
+    ladder:
+      - {width: 512, height: 768, frames: 97}
+      - {width: 704, height: 1216, frames: 97}
+      - {width: 704, height: 1216, frames: 121}
+    floor:
+      - {width: 512, height: 768, frames: 49}
+  wan22_5b:
+    label: Wan 2.2 TI2V 5B (fp16, official 20-step settings) - cloud
+    workflow: wan22_ti2v
+    files: {diffusion: wan22_ti2v_5b_fp16, text_encoder: umt5xxl_q8, vae: wan22_vae}
+    fps: 24
+    steps: 20                     # official ComfyUI template: 20 steps, cfg 5, uni_pc/simple, shift 8
+    cfg: 5.0
+    sampler: uni_pc
+    scheduler: simple
+    shift: 8.0
+    negative_prompt: *wan_negative
+    constraints: {dim_multiple: 32, frame_step: 4}
+    variants:
+      - {name: default}
+    quick: {width: 704, height: 1280, frames: 49}
+    ladder:
+      - {width: 704, height: 1280, frames: 49}
+      - {width: 704, height: 1280, frames: 97}
+      - {width: 704, height: 1280, frames: 121}
+    floor:
+      - {width: 576, height: 1024, frames: 49}
   wan21:
     label: Wan 2.1 T2V 1.3B (fp16)
     workflow: wan21_t2v

@@ -67,6 +67,30 @@ VHS or CCTV LoRAs exist for these small bases (V, HF search); the closest (war-f
 deliberately not used. Wan 1.3B step-distill LoRAs (CausVid) have unclear/non-commercial
 licensing and are not used.
 
+Round-2 results (target machine): LTX 13B Q3_K_M 512x768x49 in 1.7-1.9 min/clip (9.2 s/step,
+peak VRAM 3.2 GB, ComfyUI RSS 11-12.5 GB, system RAM near 100%); Wan 2.2 5B Turbo 576x1024x49 in
+2.4-2.7 min (VAE decode ~90 s). User preferred LTX 13B visually. The "VRAM spill" verdicts were a
+false alarm: ComfyUI's dynamic-VRAM offload keeps weights in pinned host memory, which Windows
+counts as "shared GPU memory" (~1 GB for every model). The detector now requires dedicated VRAM
+to be full as well. Real local limits: system RAM and the heavy Q3 quantization.
+
+## D1b. Cloud GPU: Kaggle as an optional second backend
+
+The local 3050 stays the primary generator (no account, quota or ToS dependency). Kaggle is added
+as a switchable backend (`unseen kaggle-bench`) so less-quantized models can be compared and,
+if clearly better, used for production with the laptop as fallback.
+
+- Mechanism (V, Kaggle CLI docs): private script kernel, `kaggle kernels push` with
+  `machine_shape`/`--accelerator`, `status`, `output`, `logs`, `kaggle quota`. The kernel clones
+  this repo at the local commit and runs the same `setup-comfy` / `fetch-models` / `bench-video`
+  code, so cloud and local share one code path. PyTorch's CUDA build is chosen from the driver.
+- Caveat (V, ComfyUI `supported_models.py`): LTX-Video runs only in bf16/fp32; the free T4
+  (Turing) has no bf16, so LTX runs in fp32 there and is expected to be no faster per clip than the
+  laptop (estimate). Gains: Q8 instead of Q3, more RAM, 2 GPUs, laptop stays free. Wan runs fp16 on
+  T4 natively. The CLI docs also list L4 accelerators (bf16, 24 GB) "only available to some users".
+- Unverified: weekly GPU hours, Kaggle's terms on automated use and on running ComfyUI (kaggle.com
+  was unreachable from the authoring machine), session disk size, driver CUDA version.
+
 **Proving "genuine motion".** `unseen/bench/metrics.py` computes optical flow between frames and
 removes the best-fit global zoom/pan/rotation; what remains ("local motion") cannot be produced by
 a Ken Burns move over a still image. Unit tests check that a synthetic Ken Burns clip scores low

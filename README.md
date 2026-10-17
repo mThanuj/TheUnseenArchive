@@ -73,7 +73,33 @@ Open `bench_results\compare.html` in a browser: every clip plays side by side, g
 (press Space to restart them together). Single runs: `uv run unseen bench-video --model ltxv
 --phases quality --preset 704x1216x97`.
 
-### 4. Full benchmark for the chosen model
+### 4. Cloud GPU on Kaggle (optional, free quota)
+
+Runs the same benchmark on Kaggle's free T4 GPUs with less-compressed models (LTX 13B Q8, Wan 2.2
+5B fp16) and downloads the clips into `compare.html`.
+
+One-time setup: create a kaggle.com account, verify your phone (Settings > Phone verification;
+needed for GPU + internet), create an API token (Settings > API > Create New Token), read
+kaggle.com/terms, then add to `.env` (see `.env.example`):
+
+```
+KAGGLE_USERNAME=your-username
+KAGGLE_API_TOKEN=the-token
+```
+
+```powershell
+git pull; uv sync
+uv run unseen kaggle-status                                # checks credentials, shows weekly GPU quota
+uv run unseen kaggle-bench --model ltxv13b_q8              # ~10-15 min setup on Kaggle, then 3 clips
+uv run unseen kaggle-bench --model wan22_5b
+uv run unseen kaggle-bench --model ltxv13b_q8 --accelerator NvidiaL4X1   # only if your account has L4
+```
+
+The job runs as a private notebook "Unseen Archive Runner" on your account and clones this repo at
+your current commit. If the local command is interrupted, `uv run unseen kaggle-fetch` downloads
+the latest results later. Each run uses GPU quota (setup included), so check `kaggle-status`.
+
+### 5. Full benchmark for the chosen model
 
 ```powershell
 uv run unseen bench-video --model ltxv               # probe -> ladder -> quality
@@ -83,7 +109,7 @@ uv run unseen bench-video --model ltxv               # probe -> ladder -> qualit
 resolution/length until something fails or exceeds 20 min/clip; `quality` renders all three test
 prompts at the largest passing size. Ctrl+C is safe; the report keeps everything finished so far.
 
-### 5. What to send back
+### 6. What to send back
 
 - The console output (especially any `ERROR`), and
 - the `report.md` of each run (paste it; `bench_results\` is git-ignored), and

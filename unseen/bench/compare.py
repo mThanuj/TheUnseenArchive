@@ -26,8 +26,10 @@ def _caption(run: dict, case: dict) -> str:
     mo = case.get("motion") or {}
     vram = ((case.get("resources") or {}).get("vram") or {}).get("peak_mb")
     wall = case.get("wall_s")
+    gpu = ((run.get("env") or {}).get("gpu") or {}).get("name", "?")
     parts = [
         f"<b>{html.escape(run.get('model_label', run.get('model_key', '?')))}</b>",
+        html.escape(f"on {gpu}"),
         html.escape(f"variant {case.get('variant')} | {case.get('preset_label')} | {case.get('memory_mode')}"),
         html.escape(f"{wall / 60:.1f} min" if isinstance(wall, (int, float)) else "-")
         + html.escape(f" | {t.get('s_per_step')} s/step | VRAM {vram} MB"),

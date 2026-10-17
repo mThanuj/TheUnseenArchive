@@ -40,6 +40,34 @@ files:
     size: 8818041856
     sha256: 032c3f28735a11a3f706ed3a01b8d1af48ff4277e151a79fdc07961250c46dd5
     license: ltxv-open-weights-0x
+  ltxv_13b_098_distilled_q8:
+    repo: QuantStack/LTXV-13B-0.9.8-distilled-GGUF
+    path: LTXV-13B-0.9.8-distilled-Q8_0.gguf
+    dest: diffusion_models
+    size: 14014784512
+    sha256: 39fc2d25a41f08787d2662f4fd57797b269cf6f19f5292ad9333d9acfa6b6e17
+    license: ltxv-open-weights-0x
+  t5xxl_q8:
+    repo: city96/t5-v1_1-xxl-encoder-gguf
+    path: t5-v1_1-xxl-encoder-Q8_0.gguf
+    dest: text_encoders
+    size: 5061584064
+    sha256: 9ec60f6028534b7fe5af439fcb535d75a68592a9ca3fcdeb175ef89e3ee99825
+    license: apache-2.0
+  umt5xxl_q8:
+    repo: city96/umt5-xxl-encoder-gguf
+    path: umt5-xxl-encoder-Q8_0.gguf
+    dest: text_encoders
+    size: 6043068256
+    sha256: 2521d4de0bf9e1cc6549866463ceae85e4ec3239bc6063f7488810be39033bbc
+    license: apache-2.0
+  wan22_ti2v_5b_fp16:
+    repo: Comfy-Org/Wan_2.2_ComfyUI_Repackaged
+    path: split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors
+    dest: diffusion_models
+    size: 9999658848
+    sha256: 456f901338bd9eadbded3828b819109a9b68e8a525ca5cf8d0049a69fcfeca1e
+    license: apache-2.0
   ltxv_13b_098_vae:
     repo: QuantStack/LTXV-13B-0.9.8-distilled-GGUF
     path: vae/LTXV-13B-0.9.8-distilled-VAE.safetensors
@@ -132,4 +160,7 @@ sets:
   wan22: [wan22_ti2v_5b_turbo_q3km, umt5xxl_q5km, wan22_vae]                 # ~8.1 GB (shares UMT5 with wan21)
   ltxv13b: [ltxv_13b_098_distilled_q3km, t5xxl_q5km, ltxv_13b_098_vae]       # ~12.4 GB (shares T5 with ltxv)
   ltxv13b_q4: [ltxv_13b_098_distilled_q4km, t5xxl_q4km, ltxv_13b_098_vae]    # ~14.2 GB; RAM-heavy experiment
+  # Cloud (Kaggle) sets: less quantization, too big for 16 GB RAM locally
+  cloud_ltxv13b_q8: [ltxv_13b_098_distilled_q8, t5xxl_q8, ltxv_13b_098_vae]  # ~21.6 GB
+  cloud_wan22_5b: [wan22_ti2v_5b_fp16, umt5xxl_q8, wan22_vae]                # ~17.5 GB
   bench: [ltxv_2b_096_distilled_q8, t5xxl_q5km, ltxv_096_vae, wan21_t2v_13b_fp16, umt5xxl_q5km, wan21_vae]

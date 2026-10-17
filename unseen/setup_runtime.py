@@ -80,6 +80,34 @@ def torch_ok(info: dict, index_url: str) -> bool:
     return bool(info.get("available")) and (major is None or str(info.get("cuda") or "").startswith(major + "."))
 
 
+def _ver(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:2])
+
+
+def driver_cuda_version() -> str | None:
+    """CUDA version supported by the installed NVIDIA driver, from the `nvidia-smi` header."""
+    try:
+        out = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"CUDA Version:\s*([\d.]+)", out)
+    return m.group(1) if m else None
+
+
+def resolve_torch_index(rt: RuntimeConfig, driver_cuda: str | None = None) -> str:
+    """`torch_index_url: auto` -> newest wheel index the driver supports; explicit URLs pass through."""
+    setting = rt.comfyui.torch_index_url
+    if setting != "auto":
+        return setting
+    driver_cuda = driver_cuda or driver_cuda_version()
+    if not driver_cuda:
+        raise RuntimeError("cannot read the driver's CUDA version from `nvidia-smi`; install the NVIDIA driver")
+    for option in sorted(rt.comfyui.torch_index_by_driver, key=lambda o: _ver(o.min_cuda), reverse=True):
+        if _ver(driver_cuda) >= _ver(option.min_cuda):
+            return option.url
+    raise RuntimeError(f"NVIDIA driver supports only CUDA {driver_cuda}; update the driver")
+
+
 def setup_comfy(rt: RuntimeConfig, log: Log = print) -> dict:
     uv = shutil.which("uv")
     if not uv:
@@ -95,7 +123,8 @@ def setup_comfy(rt: RuntimeConfig, log: Log = print) -> dict:
         ensure_checkout(node.repo, node.commit, comfy_dir / "custom_nodes" / node.name, log)
 
     py = rt.comfy_python()
-    index = rt.comfyui.torch_index_url
+    index = resolve_torch_index(rt)
+    log(f"PyTorch wheel index: {index}")
     if not py.is_file():
         log(f"Creating ComfyUI venv (Python {rt.comfyui.python})")
         _run([uv, "venv", str(rt.path("comfy_venv")), "--python", rt.comfyui.python], log)

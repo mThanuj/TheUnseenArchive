@@ -19,7 +19,7 @@ def _job(model, variant, preset, prompt="a corridor", seed=1):
         sigmas=variant.get("sigmas"), filename_prefix="bench/test/frame")
 
 
-@pytest.mark.parametrize("model_key", ["ltxv", "ltxv13b", "ltxv13b_q4", "wan21", "wan22"])
+@pytest.mark.parametrize("model_key", ["ltxv", "ltxv13b", "ltxv13b_q4", "ltxv13b_q8", "wan21", "wan22", "wan22_5b"])
 def test_every_variant_validates_against_schema(model_key, manifest, bench_cfg, object_info):
     model = bench_cfg.models[model_key]
     for variant in model.variants:

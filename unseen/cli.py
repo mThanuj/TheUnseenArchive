@@ -137,6 +137,60 @@ def cmd_comfy_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_kaggle_bench(args: argparse.Namespace) -> int:
+    from .bench.compare import write_compare
+    from .bench.video_bench import check_constraints
+    from .cloud import kaggle as kg
+    rt, manifest, cfg = load_runtime(), load_models(), load_bench()
+    if args.model not in cfg.models:
+        raise KeyError(f"unknown model {args.model!r}; choose from {sorted(cfg.models)}")
+    if args.preset and (problems := check_constraints(cfg.models[args.model], args.preset)):
+        raise ValueError("invalid --preset: " + "; ".join(problems))
+    kg.check_credentials()
+    repo, commit = kg.local_commit()
+    job = kg.KaggleJob(
+        model=args.model, model_set=kg.model_set_for(args.model, cfg, manifest),
+        repo_url=repo, commit=commit, phases=args.phases,
+        preset=args.preset.label.rstrip("f") if args.preset else None,
+        mode=args.mode, timeout_min=args.timeout_min)
+    print(f"Pushing Kaggle job ({args.accelerator}): model={job.model}, set={job.model_set}, "
+          f"phases={job.phases}, preset={job.preset or 'model default'}, commit={commit[:10]}")
+    kg.push(job, args.accelerator, args.timeout_hours)
+    print(f"Running as https://www.kaggle.com/code/{kg.kernel_ref()} (private). "
+          f"Setup + model download take ~10-15 min before the first clip.")
+    if args.no_wait:
+        print("Not waiting. Later: `uv run unseen kaggle-status` and `uv run unseen kaggle-fetch`.")
+        return 0
+    state, message = kg.wait(args.timeout_hours)
+    summary = kg.fetch(rt)
+    print(kg.describe_summary(summary))
+    print(f"Side-by-side clips: {write_compare(rt.path('bench_dir'))}")
+    return 0 if summary.get("status") == "ok" else 1
+
+
+def cmd_kaggle_status(args: argparse.Namespace) -> int:
+    from .cloud import kaggle as kg
+    kg.check_credentials()
+    state, message = kg.status()
+    print(f"{kg.kernel_ref()}: {state}{' - ' + message if message else ''}")
+    try:
+        print("\nWeekly accelerator quota:\n" + kg.quota())
+    except kg.KaggleError as exc:
+        print(f"(quota unavailable: {exc})")
+    return 0
+
+
+def cmd_kaggle_fetch(args: argparse.Namespace) -> int:
+    from .bench.compare import write_compare
+    from .cloud import kaggle as kg
+    kg.check_credentials()
+    rt = load_runtime()
+    summary = kg.fetch(rt)
+    print(kg.describe_summary(summary))
+    print(f"Side-by-side clips: {write_compare(rt.path('bench_dir'))}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="unseen", description="The Unseen Archive pipeline tools")
     parser.add_argument("--debug", action="store_true", help="show full tracebacks on errors")
@@ -176,6 +230,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--models", help="comma-separated model keys (default: every model with files present)")
     p.add_argument("--preset", type=parse_preset, help="same WxHxF for all models (default: each model's quick preset)")
     p.set_defaults(func=cmd_shootout)
+
+    p = sub.add_parser("kaggle-bench", help="run bench-video on a free Kaggle GPU and download the clips")
+    p.add_argument("--model", required=True, choices=models)
+    p.add_argument("--phases", default="quality", help="probe,ladder,quality subset (default: quality)")
+    p.add_argument("--preset", type=parse_preset, help="WIDTHxHEIGHTxFRAMES for the quality phase")
+    p.add_argument("--mode", help="ComfyUI memory mode on Kaggle (default: config's first mode)")
+    p.add_argument("--accelerator", default="NvidiaTeslaT4",
+                   help="NvidiaTeslaT4 (free T4 x2, default), or try NvidiaL4X1 / NvidiaL4 if your account has them")
+    p.add_argument("--timeout-hours", type=float, default=3.0, help="Kaggle session time limit")
+    p.add_argument("--timeout-min", type=float, help="per-clip timeout inside the job")
+    p.add_argument("--no-wait", action="store_true", help="push and return immediately")
+    p.set_defaults(func=cmd_kaggle_bench)
+
+    p = sub.add_parser("kaggle-status", help="state of the Kaggle runner + your weekly GPU quota")
+    p.set_defaults(func=cmd_kaggle_status)
+
+    p = sub.add_parser("kaggle-fetch", help="download the latest Kaggle run's results into bench_results")
+    p.set_defaults(func=cmd_kaggle_fetch)
 
     p = sub.add_parser("export-workflow", help="write a model's API-format workflow JSON")
     p.add_argument("--model", required=True, choices=models)

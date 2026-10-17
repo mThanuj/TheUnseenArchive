@@ -17,6 +17,7 @@ dependencies = [
     "pillow>=10.3",
     "huggingface_hub>=0.30",
     "tzdata>=2024.1",
+    "kaggle>=2.2",
 ]
 
 [project.scripts]

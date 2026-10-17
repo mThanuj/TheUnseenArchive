@@ -6,8 +6,15 @@ comfyui:
   ref: v0.41.3
   commit: 8713616fcc321624e306bbd36be5906203dcb0dc
   python: "3.13"                 # ComfyUI README: "Python 3.13 is very well supported"
-  torch_index_url: https://download.pytorch.org/whl/cu130   # README: cu130+ required on RTX 20-series and newer
-  min_driver_cuda: "13.0"        # `nvidia-smi` header "CUDA Version" must be >= this
+  # "auto" picks the newest PyTorch CUDA build the installed NVIDIA driver supports (from
+  # `nvidia-smi`): cu130 on the RTX 3050 (driver CUDA 13.4); older builds on cloud machines.
+  # ComfyUI's README recommends cu130+ on RTX 20-series and newer.
+  torch_index_url: auto
+  torch_index_by_driver:         # minimum driver CUDA version -> PyTorch wheel index
+    - {min_cuda: "13.0", url: "https://download.pytorch.org/whl/cu130"}
+    - {min_cuda: "12.8", url: "https://download.pytorch.org/whl/cu128"}
+    - {min_cuda: "12.6", url: "https://download.pytorch.org/whl/cu126"}
+  min_driver_cuda: "13.0"        # what `unseen doctor` expects on the local Windows machine
   host: 127.0.0.1
   port: 8188
   startup_timeout_s: 300
@@ -18,6 +25,7 @@ comfyui:
   # `--lowvram` is a no-op unless dynamic VRAM is disabled (see comfy/cli_args.py at the pinned tag).
   memory_modes:
     dynamic: []
+    classic: [--disable-dynamic-vram]
     classic_lowvram: [--disable-dynamic-vram, --lowvram]
     classic_novram: [--disable-dynamic-vram, --novram]
 
