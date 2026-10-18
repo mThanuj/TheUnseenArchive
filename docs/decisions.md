@@ -240,3 +240,22 @@ at once: a real-mystery story was saved without its critique and fact-check. Cha
   now count as readable-text risks.
 - Mistral and Cloudflare keys answered 403 without the reason being kept; 403 now disables only that
   model unless the API's message is about the key/token, and the message is shown.
+
+## M2 round 9 (2026-10-18): what round 8 showed
+
+- Mistral free mode: `mistral-large-4-0` is "not available in your subscription tier" (removed);
+  medium/small answered "Rate limit exceeded" on every call, even minutes apart (account-side
+  limit; check the console's limits page). Cloudflare: the token works; `@cf/moonshotai/kimi-k2.5`
+  now redirects to K2.6, which is paid only (removed); `@cf/openai/gpt-oss-120b` works but spends
+  output tokens on reasoning (critique/rating budgets raised to 2500/2000, critiques capped at 6
+  issues). OpenRouter: only nemotron-3-super answered in rounds 7-8; it is now first.
+  `gemini-*-pro` (404 on the free tier) is no longer listed.
+- The Dyatlov draft showed the dead hikers and a close-up of a head injury. Real victims are never
+  shown: video prompts naming bodies, remains, skulls, wounds or victims are rewritten to show the
+  place, objects or traces; injuries are mentioned only in general terms.
+- Rewrites now send an outline of the previous draft (no video prompts/sound cues) so the request
+  fits Groq's 8k tokens-per-minute cap ("request too large" skipped the best writer in round 8).
+- The banned-word fallback drops whole sentences instead of single words ("renders the scene in,
+  muted gray").
+- run_this.ps1 names each story's category (round 8's "story-fiction" step picked a real case at
+  random) and shows when Gemini's daily quotas reset.

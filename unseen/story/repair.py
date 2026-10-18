@@ -13,7 +13,8 @@ import re
 from .config import StoryConfig
 from .models import Claim, LineFixes, SceneFixes, StoryDraft, StoryPatch
 from .validate import (banned_in, device_mix_issues, first_person_slip, min_cited, readable_text_risk,
-                       sanitize_video_prompt, speech_seconds, uncited_specific, unhedged_lines, words)
+                       sanitize_video_prompt, speech_seconds, uncited_specific, unhedged_lines, victim_shots,
+                       words)
 
 OSD_DATE_TIME = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?|"
                            r"\b(?:19|20)\d{2}\b")
@@ -142,6 +143,9 @@ def scene_issues(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int
             issues.setdefault(s.id, []).append(f"remove readable text {text}; show objects without legible writing")
     for i, why in device_mix_issues(d, cfg, category, event_year).items():
         issues.setdefault(i, []).append(why + "; describe the shot as filmed with that device")
+    for i, found in victim_shots(d, cfg, category).items():
+        issues.setdefault(i, []).append(f"never show real victims, bodies or injuries {found}; show the place, "
+                                        f"objects or traces instead (an empty tent, footprints, a creek)")
     return {i: "; ".join(v) for i, v in issues.items()}
 
 

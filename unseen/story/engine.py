@@ -271,7 +271,7 @@ class StoryEngine:
             return {}   # rating on the slow local model is not worth the extra minutes
         try:
             ratings, _ = self._gen(ConceptRatings, name="rate-concepts", provider=critic, temperature=0.2,
-                                   max_tokens=1200, retries=1,
+                                   max_tokens=2000, retries=1,
                                    user=concept_rating_prompt(concepts, category, recent_titles))
         except LLMError as exc:
             self.log(f"  concept rating skipped: {str(exc)[:160]}")
@@ -368,7 +368,7 @@ class StoryEngine:
         for provider in ([critic, self.provider] if critic is not self.provider else [self.provider]):
             try:
                 critique, _ = self._gen(Critique, user=user, name="critique", provider=provider,
-                                        temperature=self.cfg.llm.temperature.critique, max_tokens=1500)
+                                        temperature=self.cfg.llm.temperature.critique, max_tokens=2500)
                 return critique
             except LLMError as exc:
                 self.log(f"  critique by {provider.name} failed: {str(exc)[:200]}")

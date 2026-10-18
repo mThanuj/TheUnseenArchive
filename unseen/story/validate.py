@@ -50,7 +50,12 @@ def banned_in(text: str, phrases: list[str]) -> list[str]:
 
 
 def sanitize_video_prompt(text: str, banned: list[str]) -> str:
-    """Last resort after the model failed to fix it: drop banned phrases, tidy punctuation."""
+    """Last resort after the model failed to fix it: drop the sentences that use banned phrases
+    (removing single words left broken prompts like "renders the scene in, muted gray"); if every
+    sentence has one, remove just the phrases."""
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s and not banned_in(s, banned)]
+    if kept:
+        return " ".join(kept)
     out = text
     for p in sorted(banned, key=len, reverse=True):
         out = _phrase_re(p).sub("", out)
@@ -89,6 +94,14 @@ def device_mix_issues(d: StoryDraft, cfg: StoryConfig, category: str, event_year
     rule = "one device for the whole reconstruction" if allowed == 1 else "at most two device types"
     return {s.id: f"use {keep[0]} like the rest of this reconstruction ({rule})"
             for s in d.scenes if s.device not in keep}
+
+
+def victim_shots(d: StoryDraft, cfg: StoryConfig, category: str) -> dict[int, list[str]]:
+    """Real cases: scenes whose video prompt would show real victims (bodies, remains, injuries)."""
+    if category != "real_mystery":
+        return {}
+    found = {s.id: banned_in(s.video_prompt, cfg.real_mystery.never_show) for s in d.scenes}
+    return {i: w for i, w in found.items() if w}
 
 
 def era_problems(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int | None) -> list[str]:
@@ -226,6 +239,8 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
                             f"without legible writing")
     problems += era_problems(d, cfg, category, event_year)
     problems += [f"scene {i}: {why}" for i, why in device_mix_issues(d, cfg, category, event_year).items()]
+    problems += [f"scene {i} video_prompt shows real victims {w}; show the place, objects or traces instead"
+                 for i, w in victim_shots(d, cfg, category).items()]
 
     # clichés
     text = " ".join([d.logline, *(n.text for n in d.narration)]).lower()

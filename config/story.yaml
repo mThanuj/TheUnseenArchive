@@ -35,11 +35,11 @@ llm:
     timeout_s: 2400 # CPU generation of a full script can take several minutes
   gemini: # key: https://aistudio.google.com/apikey -> GEMINI_API_KEY
     url: https://generativelanguage.googleapis.com/v1beta
-    # Stable models only (no -preview/-image variants), best first: pro, then flash; the normal tier
-    # adds Gemma 4 (free of charge on the same key, own quota) and flash-lite. A model without a free
-    # tier for your key answers "limit 0" once and is skipped.
+    # Stable models only (no -preview/-image variants), best first: flash models, newest first; the
+    # normal tier adds Gemma 4 (free of charge on the same key, own quota) and flash-lite. Free tier:
+    # 20 requests per model per day, reset at midnight US Pacific. (gemini-*-pro answered 404 on
+    # the free tier in rounds 7-8, so it is not listed.)
     models:
-      - "gemini-*-pro"
       - "gemini-*-flash"
       # Gemma on the Gemini API thinks at length by default (35-135 s per small call in round 7)
       - { id: gemma-4-31b-it, tier: normal, extra_body: { thinkingConfig: { thinkingLevel: minimal } } }
@@ -54,11 +54,11 @@ llm:
     mistral: # key: https://console.mistral.ai -> API Keys (free "Experiment" mode, no card) -> MISTRAL_API_KEY
       # Free mode: limits are shown in the console (Admin > API > Limits); prompts may be used for
       # training unless you opt out in the console. Story prompts are fiction/public facts only.
+      # mistral-large-4-0 is not on the free tier ("not available in your subscription tier").
       url: https://api.mistral.ai/v1
       key_env: MISTRAL_API_KEY
       extra_body: { reasoning_effort: none } # no hidden reasoning eating the output budget
       models:
-        - mistral-large-4-0
         - mistral-medium-3-5
         - { id: mistral-small-latest, tier: normal }
     groq: # key: https://console.groq.com/keys -> GROQ_API_KEY (limits are per model)
@@ -70,16 +70,17 @@ llm:
         - { id: qwen/qwen3.8-27b, tier: normal }
         - { id: openai/gpt-oss-20b, tier: normal, extra_body: { reasoning_effort: low } }
     openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY
-      # ":free" models: an account-wide daily cap on all free models plus frequent upstream limits
-      # per model, so several are listed.
+      # ":free" models: an account-wide cap (50 requests/day) on all free models plus frequent
+      # upstream limits per model, so several are listed. Ordered by what answered in rounds 7-8:
+      # nemotron-3-ultra was "overloaded" and gemma-4-31b "rate-limited upstream" on every call.
       url: https://openrouter.ai/api/v1
       key_env: OPENROUTER_API_KEY
       models:
-        - { id: "nvidia/nemotron-3-ultra-550b-a55b:free", extra_body: { reasoning: { effort: low } } }
-        - "google/gemma-4-31b-it:free"
-        - { id: "nvidia/nemotron-3-super-120b-a12b:free", tier: normal, extra_body: { reasoning: { effort: low } } }
+        - { id: "nvidia/nemotron-3-super-120b-a12b:free", extra_body: { reasoning: { effort: low } } }
         - { id: "thinkingmachines/inkling:free", tier: normal }
         - { id: "google/gemma-4-26b-a4b-it:free", tier: normal }
+        - { id: "nvidia/nemotron-3-ultra-550b-a55b:free", tier: normal, extra_body: { reasoning: { effort: low } } }
+        - { id: "google/gemma-4-31b-it:free", tier: normal }
     cerebras: # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
       url: https://api.cerebras.ai/v1
       key_env: CEREBRAS_API_KEY
@@ -87,11 +88,10 @@ llm:
         - { id: gpt-oss-120b, extra_body: { reasoning_effort: low } }
     cloudflare: # Workers AI: dash.cloudflare.com -> AI -> Workers AI -> REST API token -> CLOUDFLARE_API_TOKEN
       # + CLOUDFLARE_ACCOUNT_ID. Free: 10,000 "Neurons" per day shared by all models (roughly 10-80
-      # script-sized calls depending on the model).
+      # script-sized calls depending on the model). Kimi K2.5 now redirects to K2.6, which is paid only.
       url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
       key_env: CLOUDFLARE_API_TOKEN
       models:
-        - "@cf/moonshotai/kimi-k2.5"
         - "@cf/openai/gpt-oss-120b"
         - { id: "@cf/nvidia/nemotron-3-120b-a12b", tier: normal }
         - { id: "@cf/qwen/qwen3.8-27b", tier: normal }
@@ -251,6 +251,10 @@ rules:
       low resolution,
       pixelated,
       artifacts,
+      artifact,
+      artifacting,
+      artefact,
+      artefacts,
       text,
       subtitles,
       caption,
@@ -265,7 +269,8 @@ rules:
   content_limits: >-
     Suspense, dread and implication over shock. No gore, no harm to children or animals shown,
     no sexual content, no real living private individuals, no real brands, no slurs, no
-    self-harm. Real places may be named only for documented real-world cases.
+    self-harm. Real places may be named only for documented real-world cases. Real victims are
+    never shown: no bodies, remains or injuries of real people, on screen or described in detail.
 
 novelty:
   max_similarity: 0.86 # cosine similarity to any past story above this = too similar
@@ -280,6 +285,10 @@ quality:
 real_mystery:
   min_years_ago_sensitive: 40 # cases where people died or vanished must be historical
   max_source_chars: 9000 # how much article text the model reads (CPU speed)
+  # Real cases never show victims: a video prompt with any of these is rewritten to show the place,
+  # objects or traces instead (the Dyatlov draft in round 8 asked for a close-up of a dead hiker's head).
+  never_show: [body, bodies, corpse, corpses, human remains, skull, skulls, wound, wounds, injury, injuries,
+               injured, victim, victims, autopsy, morgue]
   # Any of these marks a line as hedged. Theories/disputed claims need one in every line that uses
   # them; a legend needs one once (the first line that tells it frames the rest).
   hedge_words:

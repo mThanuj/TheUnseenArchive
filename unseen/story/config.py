@@ -145,6 +145,7 @@ class RealMysteryCfg(BaseModel):
     min_years_ago_sensitive: int
     max_source_chars: int
     hedge_words: list[str]
+    never_show: list[str] = []   # words that mean a video prompt shows real victims
 
 
 class StoryConfig(BaseModel):

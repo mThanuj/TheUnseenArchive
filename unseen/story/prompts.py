@@ -168,7 +168,10 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
                      "'According to two medieval chroniclers, ...'); after that, tell it plainly in the Archivist's "
                      "voice and do not repeat 'according to legend'. Never add facts that are not in the claims: no "
                      "invented times, dates, counts, measurements, readings, logs, vehicles, witnesses, signs or "
-                     "objects. Refer to private people by "
+                     "objects. Never show real victims: no bodies, remains or injuries on screen; mention deaths "
+                     "and injuries only in general terms (e.g. 'three died of injuries no one could explain') and "
+                     "let the footage show places, objects and traces (an empty tent, footprints, a creek). "
+                     "Refer to private people by "
                      "their role (the photographer, his daughter, a crew member), not by name, unless they are "
                      "long-dead historical figures; never speculate about anyone's guilt or character. Visuals are "
                      "a dramatized reconstruction.\nClaims:\n" + _claims_block(claims or []))
@@ -187,12 +190,28 @@ def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
             f"(the same action in several scenes), an anomaly that is only heard or narrated but never seen, "
             f"a twist without a visual clue, narrator perspective slips, confusing continuity, shots a video "
             f"model will render badly (text, hands, crowds, close-up faces, too much happening), an ending that "
-            f"does not land. verdict = 'revise' if any score is below 7.{real}\n\n{draft.model_dump_json()}")
+            f"does not land. At most 6 issues, most important first, each under 30 words. "
+            f"verdict = 'revise' if any score is below 7.{real}\n\n{draft.model_dump_json()}")
+
+
+def draft_outline(d: StoryDraft) -> str:
+    """A draft without video prompts and sound cues: enough for a rewrite to keep what works, and
+    small enough that the whole rewrite request fits Groq's 8k tokens-per-minute cap."""
+    lines = [f"title: {d.title}", f"logline: {d.logline}", f"archive_entry: {d.archive_entry}",
+             f"recorded_year: {d.recorded_year}", "narration:"]
+    lines += [f"  [{n.id}] ({n.delivery}, pause {n.pause_after_s:g}s) {n.text}"
+              + (f"  claims {n.claim_ids}" if n.claim_ids else "") for n in d.narration]
+    lines.append("scenes:")
+    lines += [f"  [{s.id}] {s.duration_s:g} s, {s.device}, lines {s.narration_ids}: {s.visual} | motion: "
+              f"{s.motion} | camera: {s.camera} | light: {s.lighting}" for s in d.scenes]
+    lines.append(f"ending: {d.ending_note}")
+    return "\n".join(lines)
 
 
 def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique, checks: list[str] | None = None) -> str:
     extra = ("\n\nAutomatic checks also failed (fix these too):\n- " + "\n- ".join(checks)) if checks else ""
-    return (f"{base_prompt}\n\nA previous draft:\n{draft.model_dump_json()}{extra}\n\nThe editor's critique "
+    return (f"{base_prompt}\n\nA previous draft (outline; write every field, including new video prompts):\n"
+            f"{draft_outline(draft)}{extra}\n\nThe editor's critique "
             f"(scores {critique.scores()}):\n- " + "\n- ".join(critique.issues)
             + "\n\nWrite the improved, complete script. Keep what works; fix every issue. If hook, "
               "escalation, originality, ending or visual variety scored below 7, rework the scene structure "

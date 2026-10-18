@@ -28,17 +28,14 @@ $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() 
 # ----------------------------------------------------------------------------------------------
 # THIS ROUND (edited by Claude each round)
 # ----------------------------------------------------------------------------------------------
-$Round = 'M2 round 8: legends framed once, one look per real case, no clock times in shots, key diagnostics, old local models removed'
+$Round = 'M2 round 9: real victims never shown, cleaner prompts, compact rewrites, one story per category'
 $Steps = @(
     @{ Name = 'tests';          Cmd = 'uv run pytest -q -p no:cacheprovider' },
     # starts Ollama in the background if it is installed but not running (the last-resort model)
     @{ Name = 'ollama';         Cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\ensure_ollama.ps1' },
-    # one-time cleanup (asked for): the old 12B model (7.2 GB) and llama3.2:3b (2 GB) are no longer used
-    @{ Name = 'ollama-cleanup'; Cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\remove_ollama_models.ps1 -Models hf.co/google/gemma-4-12B-it-qat-q4_0-gguf,llama3.2:3b' },
-    # both answered 403 last round: this prints the API's own reason (and tries every Mistral model)
-    @{ Name = 'llm-keys';       Cmd = 'uv run unseen llm-setup --provider mistral,cloudflare' },
     @{ Name = 'story-real';     Cmd = 'uv run unseen story new --category real_mystery' },
-    @{ Name = 'story-fiction';  Cmd = 'uv run unseen story new' }
+    @{ Name = 'story-fiction';  Cmd = 'uv run unseen story new --category fiction_horror' },
+    @{ Name = 'story-psych';    Cmd = 'uv run unseen story new --category psychological_mystery' }
 )
 $MaxLinesPerStep = 400
 # ----------------------------------------------------------------------------------------------
@@ -108,6 +105,21 @@ function Get-Dirs([string]$Path) {
     return @()
 }
 
+function Get-GeminiReset {
+    # Gemini's free daily quotas (20 requests per model) reset at midnight US Pacific time
+    try {
+        $pacific = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([DateTime]::UtcNow, 'Pacific Standard Time')
+        $left = $pacific.Date.AddDays(1) - $pacific
+        return ('{0}h {1:D2}m' -f [int][math]::Floor($left.TotalHours), $left.Minutes)
+    } catch {
+        return 'unknown'
+    }
+}
+
+$GeminiReset = Get-GeminiReset
+Write-Host ("Gemini's free daily quotas reset in $GeminiReset (midnight US Pacific). Stories written " +
+            "while they are used up come from weaker models.") -ForegroundColor Yellow
+
 # ---- 1. update (and restart if this script changed) -------------------------------------------
 $Results = @()
 if (-not $SkipPull) {
@@ -159,6 +171,7 @@ $r += "- When: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 $r += "- Commit: $commit"
 $r += "- GPU: $gpu"
 $r += "- Configured keys in .env (names only): $(if ($keys) { $keys -join ', ' } else { 'none' })"
+$r += "- Gemini free quotas reset (midnight US Pacific) in: $GeminiReset (at the start of the run)"
 $r += ''
 $r += '## Summary'
 $r += ''

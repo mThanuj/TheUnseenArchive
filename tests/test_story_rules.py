@@ -269,3 +269,27 @@ def test_real_cases_keep_one_device_look_and_clock_times_count_as_text(cfg):
     from unseen.story.validate import readable_text_risk
     assert readable_text_risk("A digital readout flashes 07:45 above the door.",
                               cfg.rules.video_prompt_text_risk) == ["readout", "07:45"]
+
+
+def test_real_victims_are_never_shown_and_banned_sentences_are_dropped(cfg):
+    from unseen.story.repair import scene_issues
+    from unseen.story.validate import victim_shots
+    d = draft()
+    d.scenes[5].video_prompt += " Three bodies lie half buried in the snow by the creek."
+    assert victim_shots(d, cfg, "real_mystery") == {6: ["bodies"]}
+    assert victim_shots(d, cfg, "fiction_horror") == {}
+    assert "never show real victims" in scene_issues(d, cfg, "real_mystery", 1959)[6]
+    assert any("shows real victims" in p for p in validate_story(d, cfg, 30, "real_mystery", [], 1959))
+    clean = sanitize_video_prompt("The sensor renders the scene in grainy, muted tones. A light blinks.",
+                                  cfg.rules.video_prompt_banned_words)
+    assert clean == "A light blinks."                        # the whole sentence goes, no "in, muted"
+
+
+def test_rewrite_prompt_carries_an_outline_not_the_full_draft(cfg):
+    from storyfakes import CONCEPTS, CRITIQUE_WEAK, PROMPT
+    from unseen.story.models import Concept
+    from unseen.story.prompts import revise_prompt, script_prompt
+    base = script_prompt(cfg, "fiction_horror", 30, Concept.model_validate(CONCEPTS["concepts"][0]), {}, {}, None)
+    p = revise_prompt(base, draft(), Critique.model_validate(CRITIQUE_WEAK))
+    assert PROMPT not in p and "[6] (calm, pause 0.6s) Nobody at the motel owns a camera like hers." in p
+    assert "scene 7: ending is flat" in p
