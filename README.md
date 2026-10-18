@@ -185,7 +185,8 @@ config/            runtime.yaml (pinned ComfyUI), models.yaml (weights + sha256 
 unseen/            Python package (CLI: `uv run unseen ...`)
   comfy/           private headless ComfyUI: process control, API client, workflow builders
   bench/           Milestone 1 benchmark: runner, resource monitor, motion metrics, report
-scripts/windows/   setup.ps1, ensure_ollama.ps1 (starts the local LLM server if it isn't running)
+scripts/windows/   setup.ps1, ensure_ollama.ps1 (starts the local LLM server if it isn't running),
+                   remove_ollama_models.ps1 (deletes named local models; never the configured one)
 tests/             CPU-only unit tests
 docs/decisions.md  architecture decisions, research evidence, licensing, risks
 runtime/ models/ bench_results/   created locally (git-ignored, except benchmark reports)

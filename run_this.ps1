@@ -28,11 +28,13 @@ $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() 
 # ----------------------------------------------------------------------------------------------
 # THIS ROUND (edited by Claude each round)
 # ----------------------------------------------------------------------------------------------
-$Round = 'M2 round 8: legends framed once, one look per real case, no clock times in shots, key diagnostics'
+$Round = 'M2 round 8: legends framed once, one look per real case, no clock times in shots, key diagnostics, old local models removed'
 $Steps = @(
     @{ Name = 'tests';          Cmd = 'uv run pytest -q -p no:cacheprovider' },
     # starts Ollama in the background if it is installed but not running (the last-resort model)
     @{ Name = 'ollama';         Cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\ensure_ollama.ps1' },
+    # one-time cleanup (asked for): the old 12B model (7.2 GB) and llama3.2:3b (2 GB) are no longer used
+    @{ Name = 'ollama-cleanup'; Cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\remove_ollama_models.ps1 -Models hf.co/google/gemma-4-12B-it-qat-q4_0-gguf,llama3.2:3b' },
     # both answered 403 last round: this prints the API's own reason (and tries every Mistral model)
     @{ Name = 'llm-keys';       Cmd = 'uv run unseen llm-setup --provider mistral,cloudflare' },
     @{ Name = 'story-real';     Cmd = 'uv run unseen story new --category real_mystery' },
