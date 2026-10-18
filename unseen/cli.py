@@ -346,41 +346,65 @@ def cmd_story_render(args: argparse.Namespace) -> int:
 # ------------------------------------------------------------------ Milestone 3: narration + sound
 
 def cmd_voices(args: argparse.Namespace) -> int:
-    """Render one line in several voices so the narrator can be chosen by ear."""
+    """Render one line in several voices (and narrator styles) so the Archivist can be chosen by ear."""
     import numpy as np
+    from . import media
     from .audio.config import load_audio_config
     from .audio.dsp import write_wav
-    from .audio.tts import make_narrator, trim_silence
+    from .audio.tts import make_narrator, synth_line, trim_silence
+    from .audio.voicefx import style_filter
     from .config import REPO_ROOT
     cfg = load_audio_config()
     voices = [v.strip() for v in args.voices.split(",") if v.strip()] if args.voices else cfg.tts.audition.voices
+    styles = [x.strip() for x in args.styles.split(",") if x.strip()] if args.styles else ["dry"]
+    for st in styles:
+        cfg.narrator.current(st)   # unknown style names fail before any synthesis
     line = args.line or cfg.tts.audition.line
     speed = args.speed or cfg.tts.speed
     out = REPO_ROOT / "runs" / "voices" / f"{datetime.now():%Y%m%d-%H%M%S}"
+    out.mkdir(parents=True, exist_ok=True)
     narrator = make_narrator()
-    print(f"Voice audition at x{speed:g}: \"{line}\"\n(the first voice also downloads the Kokoro model)")
+    print(f"Voice audition at x{speed:g}, styles {', '.join(styles)}: \"{line}\"\n"
+          f"(the first voice also downloads the Kokoro model)")
     rows = []
     for v in voices:
         t0 = time.monotonic()
         try:
-            r = narrator.synth(line, v, speed)
+            r = synth_line(narrator, line, v, speed, cfg.tts.sentence_gap_s)
         except Exception as exc:   # an unknown voice name must not stop the audition
             print(f"  {v:12} FAILED: {str(exc)[:160]}")
-            rows.append(f"| {v} | failed: {str(exc)[:80]} | | |")
+            rows.append(f"| {v} | | failed: {str(exc)[:80]} | |")
             continue
         x, _ = trim_silence(r.audio, r.sample_rate)
         peak = float(np.max(np.abs(x))) or 1.0
-        path = write_wav(out / f"{v}.wav", x * (0.9 / peak), r.sample_rate)
+        dry = write_wav(out / f"{v}.wav", x * (0.9 / peak), r.sample_rate)
         took = time.monotonic() - t0
-        print(f"  {v:12} {len(x) / r.sample_rate:4.1f} s of speech, made in {took:4.1f} s -> {path}")
-        rows.append(f"| {v}{' (current)' if v == cfg.tts.voice else ''} | `{path.name}` | {len(x) / r.sample_rate:.1f} s "
-                    f"| {took:.1f} s |")
-    (out / "voices.md").parent.mkdir(parents=True, exist_ok=True)
+        for st in styles:
+            af = style_filter(cfg.narrator.current(st), r.sample_rate)
+            path = dry if af == "anull" else media.ffmpeg_af(dry, out / f"{v}-{st}.wav", af, r.sample_rate)
+            if cfg.narrator.current(st).fire_db is not None:
+                path = with_fire(path, cfg.narrator.current(st).fire_db, r.sample_rate)
+            print(f"  {v:12} {st:14} {len(x) / r.sample_rate:4.1f} s of speech -> {path.name}")
+            rows.append(f"| {v}{' (current)' if v == cfg.tts.voice else ''} | {st}"
+                        f"{' (current)' if st == cfg.narrator.style else ''} | `{path.name}` | {took:.1f} s |")
+        if "dry" not in styles:
+            dry.unlink(missing_ok=True)
     (out / "voices.md").write_text(
         f"# Voice audition\n\nLine: \"{line}\" at x{speed:g}\n\nFolder: `{out}`\n\n"
-        "| voice | file | speech | synthesis time |\n|---|---|---|---|\n" + "\n".join(rows) + "\n", encoding="utf-8")
-    print(f"\nListen to the files in {out} and say which voice the Archivist should have.")
+        "| voice | style | file | synthesis time |\n|---|---|---|---|\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    print(f"\nListen to the files in {out} and say which voice and style the Archivist should have.")
     return 0
+
+
+def with_fire(path: Path, fire_db: float, sr: int) -> Path:
+    """Audition helper: the same line with the campfire crackle under it."""
+    import numpy as np
+    from .audio import sfx
+    from .audio.dsp import at_rms, read_wav, rms_db, write_wav
+    x, sr = read_wav(path)
+    fire = at_rms(sfx.generate("fire", len(x) / sr, sr, np.random.default_rng(7)), rms_db(x) + fire_db)
+    y = x + fire[:len(x)]
+    return write_wav(path, y * (0.9 / (float(np.max(np.abs(y))) or 1.0)), sr)
 
 
 def cmd_audio(args: argparse.Namespace) -> int:
@@ -403,13 +427,33 @@ def cmd_audio(args: argparse.Namespace) -> int:
     for story_id in ids:
         print()
         try:
-            summary = render_story_audio(load_story(story_id), narrator, cfg, voice=args.voice)
+            summary = render_story_audio(load_story(story_id), narrator, cfg, voice=args.voice, style=args.style,
+                                         use_frames=not args.no_frames)
         except Exception as exc:   # keep going with the other stories
             failed += 1
             print(f"ERROR for {story_id}: {exc}")
             continue
         print(f"Listen: {summary['files']['mix']}")
     return 1 if failed else 0
+
+
+def cmd_clips(args: argparse.Namespace) -> int:
+    """Which saved stories have rendered clips (the frame-based sound uses them)."""
+    from .audio.frames import find_clips
+    from .story.render import STORIES_DIR, load_story
+    found = sorted(p.parent.name for p in STORIES_DIR.glob("*/story.json"))
+    if not found:
+        print(f"No stories in {STORIES_DIR}.")
+        return 0
+    for story_id in found:
+        record = load_story(story_id)
+        clips = find_clips(story_id)
+        scenes = [s.id for s in record.draft.scenes]
+        have = [i for i in scenes if i in clips]
+        print(f"{story_id:52} {record.category:22} clips {len(have)}/{len(scenes)}  {record.draft.title}")
+        for i in have:
+            print(f"    scene {i}: {clips[i]}")
+    return 0
 
 
 def cmd_kaggle_status(args: argparse.Namespace) -> int:
@@ -544,13 +588,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--voices", help="comma-separated Kokoro voice names (default: tts.audition.voices)")
     p.add_argument("--line", help="text to speak (default: tts.audition.line)")
     p.add_argument("--speed", type=float, help="speaking speed (default: tts.speed)")
+    p.add_argument("--styles", help="narrator styles to compare, e.g. dry,campfire (default: dry)")
     p.set_defaults(func=cmd_voices)
 
     p = sub.add_parser("audio", help="Milestone 3: narration + soundscape + mix for saved stories")
     p.add_argument("id", nargs="?", help="story id or unique prefix (default: the latest stories)")
     p.add_argument("--latest", type=int, default=1, help="without an id: narrate this many of the newest stories")
     p.add_argument("--voice", help="Kokoro voice (default: tts.voice in config/audio.yaml)")
+    p.add_argument("--style", help="narrator style (default: narrator.style in config/audio.yaml)")
+    p.add_argument("--no-frames", action="store_true", help="ignore rendered clips; use the script's sound cues")
     p.set_defaults(func=cmd_audio)
+
+    p = sub.add_parser("clips", help="which saved stories have rendered clips (for frame-based sound)")
+    p.set_defaults(func=cmd_clips)
 
     p = sub.add_parser("export-workflow", help="write a model's API-format workflow JSON")
     p.add_argument("--model", required=True, choices=models)

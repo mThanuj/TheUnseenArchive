@@ -198,8 +198,8 @@ def looks_truncated(raw: str, exc: Exception, reason: str | None) -> bool:
 
 def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, name: str,
              temperature: float = 0.7, max_tokens: int = 4096, max_retries: int = 2,
-             check: Callable[[T], list[str]] | None = None,
-             log: Log = print) -> tuple[T, CallStats, list[str]]:
+             check: Callable[[T], list[str]] | None = None, log: Log = print,
+             images: list[tuple[str, bytes]] | None = None) -> tuple[T, CallStats, list[str]]:
     """Generate a `model_cls` instance. Returns (object, stats, remaining semantic problems)."""
     schema = inline_refs(model_cls.model_json_schema())
     prompt = user
@@ -209,7 +209,8 @@ def generate(provider: Provider, model_cls: type[T], *, system: str, user: str, 
     while True:
         stats.attempts += 1
         log(f"  llm[{name}] attempt {stats.attempts} ({provider.name}:{provider.model}) ...")
-        raw, usage = provider.complete_json(system, prompt, schema, temperature, max_tokens)
+        raw, usage = provider.complete_json(system, prompt, schema, temperature, max_tokens,
+                                            **({"images": images} if images else {}))
         stats.provider, stats.model = provider.name, provider.model   # a fallback may have switched
         stats.prompt_tokens += int(usage.get("prompt_tokens") or 0)
         stats.output_tokens += int(usage.get("output_tokens") or 0)

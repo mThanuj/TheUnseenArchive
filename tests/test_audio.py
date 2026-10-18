@@ -107,29 +107,136 @@ class FakeVoice:
         return TTSResult(np.concatenate([pad, body, pad]), sr, words)
 
 
-def test_story_audio_end_to_end_with_a_fake_voice(tmp_path, monkeypatch):
+def fake_media(monkeypatch):
+    """No ffmpeg in tests: the voice treatment and mastering just copy their input."""
     import unseen.audio.pipeline as pipeline
-    from unseen.audio.pipeline import render_story_audio
 
-    def fake_loudnorm(src, dst, lufs, tp, lra, sr=48000):
+    def fake_master(src, dst, lufs, tp, lra, sr=48000):
         shutil.copy(src, dst)
-        return {"input_i": "-20.1", "input_tp": "-1.0", "input_lra": "3.0", "output_i": "-14.0",
-                "output_tp": "-1.6", "output_lra": "3.0", "normalization_type": "linear"}
+        return {"input_i": "-15.0", "input_tp": "-1.0", "input_lra": "3.0", "output_i": "-14.0",
+                "output_tp": "-1.6", "output_lra": "3.0", "normalization_type": "linear", "pre_master_i": "-21.0"}
 
-    monkeypatch.setattr(pipeline.media, "loudnorm", fake_loudnorm)
-    record = StoryRecord.model_validate({"id": "20261018-000000-room-nine", "created_at": "2026-10-18T00:00:00",
-                                         "category": "fiction_horror", "target_seconds": 30,
-                                         "concept": CONCEPTS["concepts"][0], "draft": draft_dict()})
-    summary = render_story_audio(record, FakeVoice(), SLOW.model_copy(update={"sample_rate": 16000}),
-                                 out_dir=tmp_path, log=lambda m: None)
+    def fake_af(src, dst, af, sr=48000):
+        shutil.copy(src, dst)
+        return dst
+
+    monkeypatch.setattr(pipeline.media, "master", fake_master)
+    monkeypatch.setattr(pipeline.media, "ffmpeg_af", fake_af)
+
+
+def record_from(d: dict, story_id: str = "20261018-000000-room-nine") -> StoryRecord:
+    return StoryRecord.model_validate({"id": story_id, "created_at": "2026-10-18T00:00:00",
+                                       "category": "fiction_horror", "target_seconds": 30,
+                                       "concept": CONCEPTS["concepts"][0], "draft": d})
+
+
+def test_story_audio_end_to_end_with_a_fake_voice(tmp_path, monkeypatch):
+    from unseen.audio.pipeline import render_story_audio
+    fake_media(monkeypatch)
+    summary = render_story_audio(record_from(draft_dict()), FakeVoice(), SLOW.model_copy(update={"sample_rate": 16000}),
+                                 out_dir=tmp_path, log=lambda m: None, use_frames=False)
     for name in ("mix.wav", "narration.wav", "soundscape.wav", "timeline.json", "audio_report.md"):
         assert (tmp_path / name).is_file(), name
     saved = json.loads((tmp_path / "timeline.json").read_text(encoding="utf-8"))
-    assert saved["duration_s"] >= saved["planned_s"] == 28.0
+    assert saved["duration_s"] >= saved["planned_s"] == 28.0 and saved["style"] == CFG.narrator.style
     assert [ln["id"] for ln in saved["timeline"]["lines"]] == [1, 2, 3, 4, 5, 6]
     first = saved["timeline"]["lines"][0]
     assert first["words"][0]["word"] == "Entry" and first["words"][0]["start"] >= first["start"]
     mix, sr = dsp.read_wav(tmp_path / "mix.wav")
     assert sr == 16000 and len(mix) / sr == pytest.approx(saved["duration_s"], abs=0.01)
     report = (tmp_path / "audio_report.md").read_text(encoding="utf-8")
-    assert "## Scenes" in report and "-14.0 LUFS" in report
+    assert "## Scenes" in report and "-14.0 LUFS" in report and "script's sound cues" in report
+    assert not list(tmp_path.glob("premix*")) and not list(tmp_path.glob("narration_dry*"))
+
+
+def test_sentences_get_a_storyteller_beat_between_them():
+    from unseen.audio.tts import sentences, synth_line
+    assert sentences("Entry four twelve. The camera kept recording. Watch.") == [
+        "Entry four twelve.", "The camera kept recording.", "Watch."]
+    assert sentences("Dr. Hale arrived at nine. Nobody answered.") == ["Dr. Hale arrived at nine.", "Nobody answered."]
+    one = synth_line(FakeVoice(), "The tape starts mid-step and keeps going.", "x", 1.0, 0.3)
+    two = synth_line(FakeVoice(), "The tape starts. It keeps going on.", "x", 1.0, 0.3)
+    assert len(two.audio) / two.sample_rate > len(one.audio) / one.sample_rate   # the beat is extra time
+    starts = [w["start"] for w in two.words]
+    assert starts == sorted(starts) and starts[3] >= two.words[2]["end"] + 0.29   # "It" after the gap
+
+
+def test_lines_too_long_for_their_scene_are_respoken_faster(tmp_path, monkeypatch):
+    from unseen.audio.pipeline import render_story_audio
+
+    class SpeedVoice(FakeVoice):
+        speeds = []
+
+        def synth(self, text, voice, speed):
+            SpeedVoice.speeds.append(speed)
+            return super().synth(text, voice, speed)
+
+    fake_media(monkeypatch)
+    d = draft_dict()
+    d["narration"][0]["text"] = " ".join(["word"] * 20)          # ~6.8 s spoken: scene 1 (4 s + 1.5 s) overflows
+    cfg = SLOW.model_copy(update={"tts": CFG.tts.model_copy(update={"max_speed": 1.3, "sentence_gap_s": 0.0})})
+    summary = render_story_audio(record_from(d), SpeedVoice(), cfg, out_dir=tmp_path, log=lambda m: None,
+                                 use_frames=False, style="dry")
+    assert summary["respoken"] and summary["respoken"][0].startswith("line 1 re-spoken at x")
+    assert max(SpeedVoice.speeds) > cfg.tts.speed and max(SpeedVoice.speeds) <= 1.3
+
+
+def test_narrator_styles_build_ffmpeg_chains():
+    from unseen.audio.voicefx import style_filter
+    assert style_filter(CFG.narrator.current("dry"), 48000) == "anull"
+    chain = style_filter(CFG.narrator.current("campfire"), 48000)
+    for part in ("asetrate=", "aresample=48000", "atempo=", "equalizer=f=160", "treble=", "acompressor=", "aecho="):
+        assert part in chain, part
+    with pytest.raises(KeyError):
+        CFG.narrator.current("opera")
+
+
+def make_clip(path, fps=12, seconds=2.0, size=(64, 48)):
+    """Dark for the first half, then bright: one light flicker at 1.0 s."""
+    import cv2
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), fps, size)
+    if not writer.isOpened():
+        pytest.skip("OpenCV cannot write video here")
+    n = int(fps * seconds)
+    for i in range(n):
+        writer.write(np.full((size[1], size[0], 3), 20 if i < n // 2 else 200, np.uint8))
+    writer.release()
+    return path
+
+
+class FakeVision:
+    name, model, supports_images = "gemini", "fake-vision", True
+
+    def __init__(self):
+        self.images = None
+
+    def complete_json(self, system, user, schema, temperature, max_tokens, images=None):
+        self.images = images
+        return json.dumps({"cues": [
+            {"scene": 1, "sound": "rain", "start_s": 0.0, "level": "loud", "seen": "rain streaks on the window"},
+            {"scene": 1, "sound": "silence", "start_s": 1.0},        # control cues are the script's choice
+            {"scene": 9, "sound": "door", "start_s": 0.0},           # no clip for scene 9: ignored
+        ]}), {}
+
+
+def test_sounds_come_from_the_frames_when_the_scene_was_rendered(tmp_path, monkeypatch):
+    import unseen.audio.pipeline as pipeline
+    from unseen.audio.frames import look_at_clip
+    from unseen.audio.pipeline import render_story_audio
+    clip = make_clip(tmp_path / "clip.avi")
+    look = look_at_clip(clip, 1, per_clip=3)
+    assert look.duration_s == pytest.approx(2.0, abs=0.1) and len(look.jpegs) == 3
+    assert look.flickers and look.flickers[0] == pytest.approx(1.0, abs=0.1)
+    fake_media(monkeypatch)
+    monkeypatch.setattr(pipeline, "find_clips", lambda story_id: {1: clip})
+    vision = FakeVision()
+    out = tmp_path / "audio"
+    summary = render_story_audio(record_from(draft_dict()), FakeVoice(), SLOW, out_dir=out, log=lambda m: None,
+                                 vision=vision, style="dry")
+    assert summary["frames"]["clips"] == 1 and len(vision.images) == CFG.frames.per_clip
+    assert vision.images[0][0].startswith("Scene 1, frame at 0.0 s")
+    scene1 = [(e["sound"], e["source"]) for e in summary["events"] if e["scene"] == 1]
+    assert ("rain", "frames") in scene1 and ("flicker", "pixels") in scene1
+    assert ("door", "script") not in scene1                               # the frames replaced the script's idea
+    assert ("door", "script") in [(e["sound"], e["source"]) for e in summary["events"] if e["scene"] == 2]
+    assert "rain streaks on the window" in (out / "audio_report.md").read_text(encoding="utf-8")

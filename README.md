@@ -47,8 +47,21 @@ ambience ducks under the narrator; the mix is normalised to -14 LUFS / -1.5 dBTP
 ```powershell
 uv sync --extra audio                  # TTS packages (torch CPU, kokoro, spaCy English model)
 uv run unseen voices                   # one line in 9 voices -> runs\voices\<time>\*.wav; pick by ear
+uv run unseen voices --voices bm_lewis --styles dry,campfire,campfire_fire,deep   # narrator treatments
+uv run unseen clips                    # which stories have rendered clips
 uv run unseen audio --latest 3         # narrate the 3 newest stories (or: uv run unseen audio <story id>)
 ```
+
+The Archivist is `bm_lewis` with the **campfire** treatment: a little deeper, warm and close,
+gentle compression, a small room, a beat between sentences, the last line slower
+(`narrator` in `config/audio.yaml`; `campfire_fire` adds a crackling fire under the voice).
+
+**Sound from the footage:** when a story's scenes have been rendered (`unseen story render <id>
+--kaggle`), `unseen audio` looks at the clips: a few frames per clip go to Gemini, which lists
+the sounds the camera would have recorded (rain on the window, a door, footsteps...) with their
+timing, and brightness jumps measured in the frames add light-flicker ticks. Without clips, the
+script's sound cues are used. 28 sounds are synthesized (fire, rain, thunder, crickets, heartbeat,
+whoosh, glass, rumble, stream and the earlier 18).
 
 Outputs in `runs\stories\<id>\audio\`: `mix.wav` (listen to this), `narration.wav`,
 `soundscape.wav`, `timeline.json` (scene, line and word times for M4's cuts and captions),

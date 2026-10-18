@@ -296,3 +296,26 @@ OpenRouter models are now normal tier; repeated narration lines are flagged; a f
 - **Mix:** ambience -10 dB under the narration and ducked 8 dB more while the Archivist speaks;
   peak -1 dBFS, then ffmpeg loudnorm in two passes to -14 LUFS integrated / -1.5 dBTP (common
   short-form targets; Instagram publishes no official number, U).
+
+## M3 round 2 (2026-10-18): the user's notes on round 1
+
+- **Voice:** `bm_lewis`, chosen by ear from the 9-voice audition (Kokoro grades it D+, but it fit
+  the Archivist best).
+- **"Scary modulation, like a campfire story":** a narrator treatment applied with ffmpeg to the
+  narration only: pitch -1.5 semitones with the length kept (asetrate + atempo), +3 dB warmth at
+  160 Hz, -3 dB above 7 kHz, gentle compression, a small-room echo; an extra 0.3 s beat between the
+  sentences of a line and the closing line 6% slower. Variants dry / campfire / campfire_fire (a
+  crackling fire 18 dB under the voice, not ducked) / deep are auditioned side by side.
+- **"Background noises based on the video frames":** video-to-audio models with open weights
+  (MMAudio, ThinkSound) are non-commercial (see the research record), so the footage is *looked at*
+  instead: 4 frames per rendered clip go in one call to a vision-capable model (Gemini; the LLM
+  layer now routes image calls only to models that accept images), which returns timed cues from
+  the sound vocabulary; brightness jumps measured with OpenCV add flicker ticks. For rendered scenes
+  these replace the script's cues (the script's silence/dropout choices stay). The vocabulary grew
+  from 18 to 28 synthesized sounds (fire, rain, thunder, crickets, heartbeat, whoosh, flicker, glass,
+  rumble, stream), also available to the story engine.
+- **Loudness:** round 1 ended at -15.85 LUFS because loudnorm fell back to dynamic mode on spiky
+  speech. Mastering is now: gentle compression -> gain towards -14 LUFS -> peak limiter at
+  -2.2 dBFS -> loudnorm (linear).
+- **Timing:** a line that still overflows its scene after the 1.5 s stretch is re-spoken faster,
+  never above x1.0.

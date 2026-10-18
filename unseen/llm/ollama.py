@@ -12,7 +12,7 @@ from typing import Callable
 
 import httpx
 
-from .base import LLMError, ProviderLLMError, schema_guide
+from .base import LLMError, ProviderLLMError, SkipCallLLMError, schema_guide
 
 Log = Callable[[str], None]
 
@@ -24,6 +24,7 @@ def _same_model(a: str, b: str) -> bool:
 
 class OllamaProvider:
     name = "ollama"
+    supports_images = False
 
     def __init__(self, url: str, model: str, num_ctx: int = 8192, timeout_s: float = 2400,
                  think: bool | str = False):
@@ -73,7 +74,9 @@ class OllamaProvider:
                     last_status = msg["status"]
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
-                      max_tokens: int) -> tuple[str, dict]:
+                      max_tokens: int, images: list | None = None) -> tuple[str, dict]:
+        if images:
+            raise SkipCallLLMError("ollama: image input is not wired up for the local model")
         # `format` constrains the JSON shape; the field guide tells the model what each field means.
         user = f"{user}\n\nJSON fields to fill:\n{schema_guide(schema)}\n\nWrite compact JSON without indentation."
         body = {

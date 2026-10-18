@@ -412,3 +412,33 @@ def test_critic_view_shares_cooldowns():
     fb._cool_down("groq")
     assert view._cool is fb._cool and "groq" in view._cool
     assert fb.excluding({"gemini", "groq", "ollama"}) is None
+
+
+def test_gemini_sends_images_and_only_seeing_models_get_image_calls(monkeypatch, no_keys):
+    import base64
+    from unseen.llm import gemini
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    sent = []
+    good = {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]}
+    monkeypatch.setattr(gemini.httpx, "post", lambda url, json=None, **k: sent.append(_copy(json)) or Resp(200, good))
+    p = gemini.GeminiProvider("https://g/v1beta", "gemini-3.8-flash")
+    p.complete_json("s", "u", {}, 0.5, 100, images=[("Scene 1, frame at 0.0 s:", b"\xff\xd8jpeg")])
+    parts = sent[0]["contents"][0]["parts"]
+    assert parts[1] == {"text": "Scene 1, frame at 0.0 s:"}
+    assert parts[2]["inline_data"] == {"mime_type": "image/jpeg", "data": base64.b64encode(b"\xff\xd8jpeg").decode()}
+
+    class Seeing(Slot):
+        supports_images = True
+
+        def complete_json(self, *a, images=None):
+            self.got = images
+            return super().complete_json(*a)
+
+    blind, seeing = Slot("groq", "oss"), Seeing("gemini", "flash")
+    fb = FallbackProvider([blind, seeing], log=lambda m: None)
+    assert fb.complete_json("s", "u", {}, 0, 1, images=[("x", b"y")])[0] == "from gemini:flash"
+    assert blind.calls == 0 and seeing.got == [("x", b"y")] and fb.name == "gemini"
+    assert fb.complete_json("s", "u", {}, 0, 1)[0] == "from groq:oss"          # text calls: normal order
+    with pytest.raises(LLMError, match="accepts images"):
+        FallbackProvider([Slot("groq", "a"), Slot("zai", "b")], log=lambda m: None).complete_json(
+            "s", "u", {}, 0, 1, images=[("x", b"y")])

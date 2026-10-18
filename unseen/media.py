@@ -96,3 +96,31 @@ def loudnorm(src: Path, dst: Path, lufs: float, true_peak_db: float, lra: float,
                                             "-ar", str(sr), "-c:a", "pcm_s16le", str(dst)]))
     return {**{k: first[k] for k in ("input_i", "input_tp", "input_lra")},
             **{k: second[k] for k in ("output_i", "output_tp", "output_lra", "normalization_type")}}
+
+
+def ffmpeg_af(src: Path, dst: Path, af: str, sr: int = 48000) -> Path:
+    """Run an audio filter chain over a WAV: mono 16-bit PCM at `sr` out."""
+    _ffmpeg_stderr(["-y", "-i", str(src), "-af", af, "-ar", str(sr), "-ac", "1", "-c:a", "pcm_s16le", str(dst)])
+    return dst
+
+
+def master(src: Path, dst: Path, lufs: float, true_peak_db: float, lra: float, sr: int = 48000) -> dict:
+    """Mastering for a Reel: gentle compression, gain towards the target with a peak limiter below
+    the true-peak ceiling, then loudnorm (two passes). Limiting first lets loudnorm stay linear
+    instead of falling back to its dynamic mode (which missed -14 LUFS by 1.9 LU on spiky speech)."""
+    comp = dst.with_name(dst.stem + "_comp.wav")
+    lim = dst.with_name(dst.stem + "_lim.wav")
+    try:
+        ffmpeg_af(src, comp, "acompressor=threshold=0.1:ratio=2.5:attack=10:release=200", sr)
+        measured = parse_loudnorm(_ffmpeg_stderr(["-i", str(comp), "-af",
+                                                  f"loudnorm=I={lufs}:TP={true_peak_db}:LRA={lra}:print_format=json",
+                                                  "-f", "null", "-"]))
+        gain = lufs - float(measured["input_i"]) + 0.3
+        ceiling = 10 ** ((true_peak_db - 0.7) / 20)   # sample-peak ceiling with room for inter-sample peaks
+        ffmpeg_af(comp, lim, f"volume={gain:.2f}dB,alimiter=limit={ceiling:.4f}:attack=3:release=60:level=0", sr)
+        result = loudnorm(lim, dst, lufs, true_peak_db, lra, sr)
+        result["pre_master_i"] = measured["input_i"]
+        return result
+    finally:
+        comp.unlink(missing_ok=True)
+        lim.unlink(missing_ok=True)

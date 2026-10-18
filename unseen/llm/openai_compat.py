@@ -95,8 +95,12 @@ class OpenAICompatProvider:
             raise LLMError(f"{self.name} returned {r.status_code}: {r.text[:300]}")
         return sorted(m.get("id", "") for m in r.json().get("data", []))
 
+    supports_images = False
+
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
-                      max_tokens: int) -> tuple[str, dict]:
+                      max_tokens: int, images: list | None = None) -> tuple[str, dict]:
+        if images:
+            raise SkipCallLLMError(f"{self.name}:{self.model}: no image input configured")
         user = (f"{user}\n\nJSON fields to fill:\n{schema_guide(schema)}\n\n"
                 f"Answer with a single compact JSON object (no indentation, no commentary).")
         body = {"model": self.model, "temperature": temperature, "max_tokens": max_tokens,

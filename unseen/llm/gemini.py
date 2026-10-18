@@ -8,6 +8,7 @@ the API's own schema features.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -42,6 +43,7 @@ def quota_error(model: str, r) -> TransientLLMError:
 
 class GeminiProvider:
     name = "gemini"
+    supports_images = True
 
     def __init__(self, url: str, model: str, timeout_s: float = 300, thinking_budget: int | None = 1024,
                  max_output_tokens: int = 16384, generation: dict | None = None):
@@ -80,17 +82,21 @@ class GeminiProvider:
             raise TransientLLMError(f"Gemini request failed: {exc!r}") from None
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
-                      max_tokens: int) -> tuple[str, dict]:
+                      max_tokens: int, images: list[tuple[str, bytes]] | None = None) -> tuple[str, dict]:
+        """`images`: (caption, JPEG bytes) pairs, sent after the prompt, each preceded by its caption."""
         config = {"temperature": temperature, "maxOutputTokens": max(max_tokens, self.max_output_tokens)}
         if self.json_mode:
             config["responseMimeType"] = "application/json"
         if self.thinking_budget is not None:
             config["thinkingConfig"] = {"thinkingBudget": self.thinking_budget}
         config.update(self.generation)
+        parts = [{"text": f"{user}\n\nReturn one compact JSON object matching this JSON Schema:\n{json.dumps(schema)}"}]
+        for caption, jpeg in images or []:
+            parts += [{"text": caption},
+                      {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(jpeg).decode("ascii")}}]
         body = {
             "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": f"{user}\n\nReturn one compact JSON object matching "
-                                                              f"this JSON Schema:\n{json.dumps(schema)}"}]}],
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": config,
         }
         for _ in range(3):

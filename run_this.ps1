@@ -28,13 +28,19 @@ $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() 
 # ----------------------------------------------------------------------------------------------
 # THIS ROUND (edited by Claude each round)
 # ----------------------------------------------------------------------------------------------
-$Round = 'M3 round 1: narrator voice audition + narration, soundscape and mix for the 3 newest stories'
+$Round = 'M3 round 2: campfire narrator styles (bm_lewis), sound from the rendered frames, fixed loudness'
+$Story = '20261018-163824-the-warm-hull'   # round 1's story: rendered now so its sound can come from the footage
 $Steps = @(
     @{ Name = 'tests';          Cmd = 'uv run pytest -q -p no:cacheprovider' },
-    # the first run downloads the Kokoro TTS model from Hugging Face (a few hundred MB, once)
-    @{ Name = 'voices';         Cmd = 'uv run unseen voices' },
-    # narrates round 9's three stories (real, fiction, psychological) with the default voice
-    @{ Name = 'audio';          Cmd = 'uv run unseen audio --latest 3' }
+    # bm_lewis in four narrator treatments: listen and pick one
+    @{ Name = 'voices';         Cmd = 'uv run unseen voices --voices bm_lewis --styles dry,campfire,campfire_fire,deep' },
+    # which saved stories have rendered clips
+    @{ Name = 'clips';          Cmd = 'uv run unseen clips' },
+    @{ Name = 'kaggle-status';  Cmd = 'uv run unseen kaggle-status' },
+    # renders its 10 scenes on the free Kaggle GPU at preview size (~40-45 min, waits and downloads)
+    @{ Name = 'render';         Cmd = "uv run unseen story render $Story --kaggle" },
+    # narration + sound chosen from the rendered frames + mastering to -14 LUFS
+    @{ Name = 'audio';          Cmd = "uv run unseen audio $Story" }
 )
 $MaxLinesPerStep = 400
 # ----------------------------------------------------------------------------------------------

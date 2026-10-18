@@ -125,12 +125,12 @@ class FallbackProvider:
         self._log(f"  {what} rate-limited ({detail}); cooling down {wait:.0f} s, trying the next model")
 
     # ------------------------------------------------------------------ calls
-    def _try(self, i: int, p, args: tuple, errors: dict[str, str], skip: set[str]):
+    def _try(self, i: int, p, args: tuple, kwargs: dict, errors: dict[str, str], skip: set[str]):
         """Call one slot; returns its output, or None after recording why it failed."""
         key = self.key(p)
         for attempt in range(2):
             try:
-                out = p.complete_json(*args)
+                out = p.complete_json(*args, **kwargs)
             except SkipCallLLMError as exc:
                 skip.add(key)
                 errors[key] = brief(exc, 300)
@@ -169,8 +169,18 @@ class FallbackProvider:
         return min(pending, key=lambda x: x[0]) if pending else None
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
-                      max_tokens: int) -> tuple[str, dict]:
-        args = (system, user, schema, temperature, max_tokens)
+                      max_tokens: int, images: list | None = None) -> tuple[str, dict]:
+        if images:   # only models that can see take image calls (Gemini); same cool-downs
+            seeing = [p for p in self.providers if getattr(p, "supports_images", False)]
+            if not seeing:
+                raise LLMError("no configured model accepts images (add GEMINI_API_KEY to .env)")
+            view = self._view(seeing)
+            out = view._complete((system, user, schema, temperature, max_tokens), {"images": images})
+            self.active = self.providers.index(view.providers[view.active])   # stats name the model that saw
+            return out
+        return self._complete((system, user, schema, temperature, max_tokens), {})
+
+    def _complete(self, args: tuple, kwargs: dict) -> tuple[str, dict]:
         errors: dict[str, str] = {}
         skip: set[str] = set()   # slots that can't take this request: this call only
         waited = 0.0
@@ -178,7 +188,7 @@ class FallbackProvider:
             for i, p in enumerate(self.providers):
                 if p.name in self.slow or self.key(p) in skip or self._until(p) > self._clock():
                     continue
-                out = self._try(i, p, args, errors, skip)
+                out = self._try(i, p, args, kwargs, errors, skip)
                 if out is not None:
                     return out
             nxt = self._next_free(skip)
@@ -191,7 +201,7 @@ class FallbackProvider:
                     continue
             for i, p in enumerate(self.providers):   # the slow local model is the last resort
                 if p.name in self.slow and self._until(p) <= self._clock():
-                    out = self._try(i, p, args, errors, skip)
+                    out = self._try(i, p, args, kwargs, errors, skip)
                     if out is not None:
                         return out
             detail = " | ".join(f"{k}: {v[:160]}" for k, v in errors.items()) or "all cooling down"

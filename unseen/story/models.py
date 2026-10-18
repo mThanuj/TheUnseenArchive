@@ -17,7 +17,8 @@ DeviceName = Literal["camcorder", "cctv", "night_vision", "phone", "bodycam", "d
 DeliveryName = Literal["calm", "hushed", "tense", "flat", "urgent"]
 SoundName = Literal["room_tone", "drone", "hum", "electrical_buzz", "footsteps", "door", "knock", "impact",
                     "creak", "wind", "water_drip", "radio_static", "breathing", "whisper", "dropout",
-                    "silence", "distant_voice", "machine"]
+                    "silence", "distant_voice", "machine", "fire", "rain", "thunder", "crickets", "heartbeat",
+                    "whoosh", "flicker", "glass", "rumble", "stream"]
 ClaimTag = Literal["fact", "disputed", "theory", "legend"]
 
 
@@ -59,7 +60,14 @@ Sound = Annotated[SoundName, BeforeValidator(_lenient(SoundName, {
     "crunch": "impact", "slam": "door", "door_slam": "door", "step": "footsteps", "steps": "footsteps",
     "drip": "water_drip", "voice": "distant_voice", "voices": "distant_voice", "whispers": "whisper",
     "breath": "breathing", "ambience": "room_tone", "ambient": "room_tone", "tone": "drone",
-    "rumble": "drone", "scrape": "creak", "squeak": "creak", "glitch": "dropout", "cut": "dropout"},
+    "scrape": "creak", "squeak": "creak", "glitch": "dropout", "cut": "dropout",
+    "crackle": "fire", "crackling": "fire", "campfire": "fire", "fireplace": "fire", "flames": "fire",
+    "rainfall": "rain", "drizzle": "rain", "downpour": "rain", "storm": "thunder", "thunderstorm": "thunder",
+    "cricket": "crickets", "insects": "crickets", "night_insects": "crickets", "heart": "heartbeat",
+    "heartbeats": "heartbeat", "swoosh": "whoosh", "rush": "whoosh", "flickering": "flicker",
+    "light_flicker": "flicker", "shatter": "glass", "glass_break": "glass", "breaking_glass": "glass",
+    "rumbling": "rumble", "earthquake": "rumble", "river": "stream", "creek": "stream", "brook": "stream",
+    "running_water": "stream"},
     "room_tone"))]
 
 

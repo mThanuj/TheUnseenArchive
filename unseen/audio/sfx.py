@@ -197,12 +197,95 @@ def distant_voice(n, sr, rng):
     return _peak(fade(room, sr, 0.2, 0.4))
 
 
+def fire(n, sr, rng):
+    roar = band(pink(n, rng), sr, lo=80, hi=600) * (0.6 + 0.4 * slow_random(n, sr, 1.5, rng))
+    crackle = _bursts(n, sr, rng, 12.0, 0.003, 1500, 8000)
+    pops = _bursts(n, sr, rng, 1.5, 0.015, 300, 3000)
+    return at_rms(roar + 4.0 * crackle + 3.0 * pops, BED_RMS_DB)
+
+
+def rain(n, sr, rng):
+    hiss = band(white(n, rng), sr, lo=400, hi=9000) * (0.85 + 0.15 * slow_random(n, sr, 0.4, rng))
+    return at_rms(hiss + 2.5 * _bursts(n, sr, rng, 40.0, 0.002, 2000, 10000), BED_RMS_DB)
+
+
+def crickets(n, sr, rng):
+    out = np.zeros(n, np.float32)
+    for carrier, period in ((rng.uniform(4200, 4800), rng.uniform(0.6, 0.9)), (rng.uniform(3600, 4100), rng.uniform(0.8, 1.1))):
+        m = int(0.025 * sr)
+        pulse = _tone(carrier, m, sr) * np.sin(np.linspace(0, np.pi, m)) ** 2
+        t = rng.uniform(0, period)
+        while t < n / sr:
+            for k in range(rng.integers(3, 5)):   # one chirp = 3-4 quick pulses
+                place(out, pulse, int((t + k * 0.033) * sr), rng.uniform(0.6, 1.0))
+            t += period * rng.uniform(0.9, 1.1)
+    return _peak(out)
+
+
+def heartbeat(n, sr, rng):
+    out = np.zeros(n, np.float32)
+    m = int(0.18 * sr)
+    tt = _t(m, sr)
+    thump = (np.sin(TAU * 50 * tt) + 0.5 * np.sin(TAU * 90 * tt)) * decay(m, sr, 0.12)
+    beat = 60 / rng.uniform(62, 78)
+    t = 0.1
+    while t < n / sr:
+        place(out, thump, int(t * sr))
+        place(out, thump, int((t + 0.25) * sr), 0.7)   # lub-dub
+        t += beat
+    return _peak(out)
+
+
+def rumble(n, sr, rng):
+    x = band(pink(n, rng), sr, lo=25, hi=90)
+    return at_rms(x * (0.4 + 0.6 * slow_random(n, sr, 0.2, rng)), BED_RMS_DB)
+
+
+def stream(n, sr, rng):
+    x = sum(band(white(n, rng), sr, lo, hi) * (0.4 + 0.6 * slow_random(n, sr, rate, rng))
+            for lo, hi, rate in ((200, 800, 3.0), (800, 2500, 6.0), (2500, 6000, 11.0)))
+    return at_rms(x, BED_RMS_DB)
+
+
+def thunder(n, sr, rng):
+    crack = band(white(n, rng), sr, lo=300, hi=5000) * decay(n, sr, 0.25)
+    t = _t(n, sr)
+    swell = np.minimum(1.0, t / 0.4) * decay(n, sr, max(n / sr - 0.3, 0.5))
+    roll = band(pink(n, rng), sr, lo=30, hi=300) * swell * (0.5 + 0.5 * slow_random(n, sr, 3.0, rng))
+    return _peak(0.6 * crack + roll)
+
+
+def whoosh(n, sr, rng):
+    shape = np.sin(np.linspace(0, np.pi, n)) ** 2
+    bright = np.sin(np.linspace(0, np.pi, n))        # brightest at the middle, like something passing
+    x = (bright * band(white(n, rng), sr, lo=1000, hi=6000) + (1 - bright) * band(white(n, rng), sr, hi=800)) * shape
+    return _peak(x)
+
+
+def flicker(n, sr, rng):
+    buzz = sum(_tone(100.0 * k, n, sr, rng.uniform(0, TAU)) / k for k in range(1, 16))
+    gate = (slow_random(n, sr, 15.0, rng) > 0.5).astype(np.float32)
+    clicks = _bursts(n, sr, rng, 10.0, 0.002, 2000, 9000)
+    return _peak(fade(buzz * gate + 3.0 * clicks, sr, 0.01, 0.05))
+
+
+def glass(n, sr, rng):
+    out = band(white(n, rng), sr, lo=3000, hi=12000) * decay(n, sr, 0.3) * 0.5
+    for _ in range(18):
+        m = int(rng.uniform(0.05, 0.3) * sr)
+        ping = _tone(rng.uniform(2000, 6500), m, sr) * decay(m, sr, m / sr)
+        place(out, ping, int(rng.uniform(0.0, 0.4) * sr), rng.uniform(0.2, 0.7))
+    return _peak(out)
+
+
 BEDS: dict[str, Gen] = {"room_tone": room_tone, "drone": drone, "hum": hum, "electrical_buzz": electrical_buzz,
                         "radio_static": radio_static, "wind": wind, "machine": machine,
-                        "water_drip": water_drip, "breathing": breathing}
+                        "water_drip": water_drip, "breathing": breathing, "fire": fire, "rain": rain,
+                        "crickets": crickets, "heartbeat": heartbeat, "rumble": rumble, "stream": stream}
 ONE_SHOTS: dict[str, tuple[Gen, float]] = {"footsteps": (footsteps, 2.4), "door": (door, 1.6), "knock": (knock, 1.3),
                                            "impact": (impact, 1.8), "creak": (creak, 1.1), "whisper": (whisper, 1.6),
-                                           "distant_voice": (distant_voice, 2.2)}
+                                           "distant_voice": (distant_voice, 2.2), "thunder": (thunder, 4.0),
+                                           "whoosh": (whoosh, 1.2), "flicker": (flicker, 0.6), "glass": (glass, 1.5)}
 CONTROL = {"silence", "dropout"}   # not sounds: they cut the soundscape
 
 

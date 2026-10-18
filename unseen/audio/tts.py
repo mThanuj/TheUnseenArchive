@@ -6,6 +6,8 @@ line's start; used for captions in M4). The engine is chosen in config/audio.yam
 
 from __future__ import annotations
 
+import re
+import warnings
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -23,6 +25,47 @@ class TTSResult:
 
 class Narrator(Protocol):
     def synth(self, text: str, voice: str, speed: float) -> TTSResult: ...
+
+
+SENTENCE_END = re.compile(r"(?<=[.!?])[\"\u201d\u2019)]?\s+")
+
+
+def sentences(text: str, min_words: int = 3) -> list[str]:
+    """Split a narration line into sentences; fragments shorter than `min_words` (e.g. "Dr.") stay
+    with the sentence before them."""
+    out: list[str] = []
+    for piece in (p.strip() for p in SENTENCE_END.split(text.strip())):
+        if not piece:
+            continue
+        if out and len(out[-1].split()) < min_words:
+            out[-1] = f"{out[-1]} {piece}"
+        else:
+            out.append(piece)
+    return out or [text]
+
+
+def synth_line(narrator: "Narrator", text: str, voice: str, speed: float, gap_s: float) -> TTSResult:
+    """One narration line, sentence by sentence with an extra beat (gap_s) between sentences: the
+    measured cadence of someone telling a story, not a continuous read."""
+    parts = sentences(text) if gap_s > 0 else [text]
+    if len(parts) == 1:
+        return narrator.synth(text, voice, speed)
+    audio: list[np.ndarray] = []
+    words: list[dict] = []
+    sr = 0
+    t = 0.0
+    for k, part in enumerate(parts):
+        r = narrator.synth(part, voice, speed)
+        sr = r.sample_rate
+        x, offset = trim_silence(r.audio, sr)
+        words += [{**w, "start": round(t + max(0.0, w["start"] - offset), 3),
+                   "end": round(t + max(0.0, w["end"] - offset), 3)} for w in r.words]
+        audio.append(x)
+        t += len(x) / sr
+        if k < len(parts) - 1:
+            audio.append(np.zeros(int(gap_s * sr), np.float32))
+            t += gap_s
+    return TTSResult(np.concatenate(audio), sr, words)
 
 
 def trim_silence(x: np.ndarray, sr: int, threshold_db: float = -45.0, keep_s: float = 0.03) -> tuple[np.ndarray, float]:
@@ -59,6 +102,9 @@ class KokoroNarrator:
             raise RuntimeError("Kokoro TTS is not installed: run `uv sync --extra audio` "
                                "(run_this.ps1 does this)") from exc
         self._pipeline_cls = KPipeline
+        for message in ("dropout option adds dropout", r"`torch\.nn\.utils\.weight_norm` is deprecated",
+                        r"`torch\.jit\.script` is deprecated"):   # harmless warnings from inside Kokoro
+            warnings.filterwarnings("ignore", message=message)
         self.device = device
         self._pipes: dict[str, object] = {}
         self._model = None
