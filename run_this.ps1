@@ -48,6 +48,7 @@ Set-Location -LiteralPath $PSScriptRoot
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
+$env:PYTHONUNBUFFERED = '1'   # Python writes each line immediately even into a pipe: live output
 $env:NO_COLOR = '1'
 $env:PY_COLORS = '0'
 
@@ -62,8 +63,18 @@ function Invoke-Logged([string]$Name, [string]$Cmd, [int]$Index) {
     Write-Host ''
     Write-Host ('=== [{0}] {1}: {2}' -f $Index, $Name, $Cmd) -ForegroundColor Cyan
     $start = Get-Date
-    # Out-Host: show live output without it becoming this function's return value
-    cmd /c "chcp 65001 >nul & $Cmd 2>&1" | Tee-Object -FilePath $log | Out-Host
+    # every line is shown and written to the log the moment it arrives (live output)
+    $writer = New-Object System.IO.StreamWriter($log, $false, (New-Object System.Text.UTF8Encoding($false)))
+    $writer.AutoFlush = $true
+    try {
+        cmd /c "chcp 65001 >nul & $Cmd 2>&1" | ForEach-Object {
+            $line = [string]$_
+            $writer.WriteLine($line)
+            Write-Host $line
+        }
+    } finally {
+        $writer.Close()
+    }
     $code = $LASTEXITCODE
     $secs = [int]((Get-Date) - $start).TotalSeconds
     $color = 'Green'
@@ -75,7 +86,7 @@ function Invoke-Logged([string]$Name, [string]$Cmd, [int]$Index) {
 function Get-CleanLines([string]$Path, [int]$Max) {
     if (-not (Test-Path -LiteralPath $Path)) { return @('(no output)') }
     $clean = @()
-    foreach ($line in (Get-Content -LiteralPath $Path)) {
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8)) {
         $t = ($line -split "`r")[-1]
         $t = $t -replace '\x1B\[[0-9;?]*[A-Za-z]', ''
         if ($t.Contains($Bar)) { continue }

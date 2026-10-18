@@ -484,7 +484,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(errors="replace")  # never crash on a cp1252 console
+            # never crash on a cp1252 console; flush every line even into a pipe (live logs)
+            stream.reconfigure(errors="replace", line_buffering=True)
         except (AttributeError, ValueError):
             pass
     load_dotenv()
