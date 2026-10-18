@@ -395,9 +395,13 @@ class StoryEngine:
             if line is None:
                 continue
             entry = {"id": v.id, "verdict": v.verdict, "original": line.text}
-            if v.verdict in ("unsupported", "contradicted") and v.corrected.strip():
-                line.text = v.corrected.strip()
-                entry["corrected"] = line.text
+            fixed = v.corrected.strip()
+            if v.verdict in ("unsupported", "contradicted") and fixed:
+                if fixed.lower() == line.text.strip().lower():
+                    entry["verdict"] = "supported"   # flagged, but its "correction" is the same line
+                else:
+                    line.text = fixed
+                    entry["corrected"] = line.text
             report.append(entry)
         bad = [e for e in report if e["verdict"] in ("unsupported", "contradicted")]
         self.log(f"  fact-check: {len(report) - len(bad)} line(s) supported/atmospheric, {len(bad)} corrected"

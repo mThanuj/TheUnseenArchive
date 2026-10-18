@@ -143,6 +143,22 @@ def min_cited(d: StoryDraft) -> int:
     return max(1, (2 * len(d.narration)) // 3)
 
 
+def repeated_lines(d: StoryDraft, overlap: float = 0.7) -> dict[int, int]:
+    """{line id: earlier line id} for narration lines that mostly repeat an earlier one (share at least
+    70% of the shorter line's content words, e.g. "2019 inspection found brickwork intact" twice)."""
+    seen: list[tuple[int, set[str]]] = []
+    out: dict[int, int] = {}
+    for n in d.narration:
+        content = {w.lower() for w in words(n.text) if len(w) > 3}
+        for prev_id, prev in seen:
+            small = min(len(content), len(prev))
+            if small >= 3 and len(content & prev) / small >= overlap:
+                out[n.id] = prev_id
+                break
+        seen.append((n.id, content))
+    return out
+
+
 def unhedged_lines(d: StoryDraft, cfg: StoryConfig, claims: list[Claim] | None) -> dict[int, list[str]]:
     """Real cases: {line id: tags} for lines stating a theory/disputed claim without a hedge, or telling
     a legend before it has been framed. A legend needs its framing once ("According to two medieval
@@ -190,6 +206,8 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
         told = banned_in(n.text, r.narration_banned_words)
         if told:
             problems.append(f"narration line {n.id} uses {told}; state facts and let the footage do the work")
+    for i, j in repeated_lines(d).items():
+        problems.append(f"narration line {i} repeats line {j}; every line should add something new")
 
     # scenes and coverage
     if len(d.scenes) > length.max_scenes:

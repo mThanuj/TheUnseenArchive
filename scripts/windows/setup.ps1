@@ -5,7 +5,7 @@
 .DESCRIPTION
   1. Checks git, ffmpeg/ffprobe and the NVIDIA driver (nvidia-smi).
   2. Installs uv (Python package/venv manager) with winget if it is missing.
-  3. Creates the app environment (.venv, Python 3.12) with `uv sync`.
+  3. Creates the app environment (.venv, Python 3.12) with `uv sync --extra audio` (audio = M3 TTS).
   4. Installs the pinned ComfyUI + ComfyUI-GGUF and a separate CUDA PyTorch venv
      (runtime\comfy-venv, Python 3.13) via `uv run unseen setup-comfy`.
   5. Runs `uv run unseen doctor`.
@@ -84,7 +84,7 @@ if (-not (Test-Tool 'uv')) {
 Invoke-Checked 'uv' @('--version')
 
 Write-Step "Creating the app environment (.venv, Python 3.12)"
-Invoke-Checked 'uv' @('sync')
+Invoke-Checked 'uv' @('sync', '--extra', 'audio')
 
 if (-not $SkipComfy) {
     Write-Step "Installing pinned ComfyUI + CUDA PyTorch (first run downloads ~4 GB)"

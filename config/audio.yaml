@@ -1,0 +1,58 @@
+# Milestone 3: narration (text-to-speech) and procedural soundscape. Everything runs on the CPU.
+
+sample_rate: 48000 # the mix; video uses 48 kHz audio
+
+tts:
+  # Kokoro-82M (Apache-2.0) on the CPU. The Archivist: calm, precise, slightly weary. Pick the voice
+  # by ear: `uv run unseen voices` renders the same line in every voice listed under audition.
+  # American voices start with a, British with b; m = male, f = female. Kokoro's own quality grades
+  # for the male voices: am_michael/am_fenrir/am_puck C+, bm_george/bm_fable C, bm_lewis D+.
+  voice: am_michael
+  speed: 0.88 # slow, deliberate delivery (1.0 = the voice's natural pace)
+  # per-line delivery tags from the script (models.DeliveryName): speed multiplier, gain in dB
+  delivery:
+    calm: { speed: 1.0, gain_db: 0.0 }
+    flat: { speed: 1.0, gain_db: 0.0 }
+    hushed: { speed: 0.95, gain_db: -3.0 }
+    tense: { speed: 1.04, gain_db: 0.0 }
+    urgent: { speed: 1.08, gain_db: 1.0 }
+  audition:
+    line: "Entry four twelve. The camera kept recording after the battery was removed. Watch the doorway."
+    voices: [am_michael, am_fenrir, am_puck, bm_george, bm_fable, bm_lewis, af_heart, af_bella, bf_emma]
+
+timing:
+  first_lead_in_s: 0.15 # the hook starts almost at once
+  lead_in_s: 0.35 # silence before the first line of every other scene
+  tail_s: 0.35 # minimum room after a scene's last line before the next scene starts
+  max_stretch_s: 1.5 # a scene may run this much longer than planned to fit its narration (the clip is held/slowed in M4)
+
+mix:
+  narration_rms_db: -20 # every line is levelled to this before mixing
+  ambience_db: -10 # the whole soundscape relative to the narration
+  duck_db: -8 # extra cut to the soundscape while the Archivist speaks
+  duck_attack_s: 0.08
+  duck_release_s: 0.6
+  peak_db: -1.0 # before loudness normalisation
+  loudness: { integrated_lufs: -14.0, true_peak_db: -1.5, lra: 11.0 } # final mix (ffmpeg loudnorm, two passes)
+
+# Level of each sound in the soundscape (dB). Beds run from their cue to the end of the scene;
+# room_tone also plays quietly under every scene so the Reel is never digitally silent, except
+# after a `silence` cue (silence before the reveal is a deliberate effect).
+sfx_db:
+  room_tone: -12
+  drone: -4
+  hum: -9
+  electrical_buzz: -10
+  radio_static: -10
+  wind: -4
+  machine: -8
+  water_drip: -6
+  breathing: -8
+  footsteps: -3
+  door: 0
+  knock: 0
+  impact: 0
+  creak: -2
+  whisper: -7
+  distant_voice: -6
+dropout_s: 0.25 # a `dropout` cue cuts everything for this long (tape dropout)

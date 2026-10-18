@@ -62,3 +62,37 @@ def probe(path: Path) -> dict:
         "duration_s": round(duration, 3),
         "size_bytes": int(data.get("format", {}).get("size") or 0),
     }
+
+
+def parse_loudnorm(stderr: str) -> dict:
+    """The JSON block ffmpeg's loudnorm filter prints (print_format=json) at the end of stderr."""
+    start = stderr.rfind("{")
+    end = stderr.rfind("}")
+    if start == -1 or end < start:
+        raise RuntimeError("ffmpeg loudnorm printed no measurement")
+    return json.loads(stderr[start:end + 1])
+
+
+def _ffmpeg_stderr(args: list[str]) -> str:
+    proc = subprocess.run([require("ffmpeg"), "-hide_banner", "-nostats", *args], capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed (exit {proc.returncode}): {proc.stderr.strip()[-1500:]}")
+    return proc.stderr
+
+
+def loudnorm(src: Path, dst: Path, lufs: float, true_peak_db: float, lra: float, sr: int = 48000) -> dict:
+    """Two-pass EBU R128 loudness normalisation (measure, then apply linearly) to a 16-bit WAV.
+
+    Returns {"input_i", "input_tp", "output_i", "output_tp", ...} as reported by ffmpeg."""
+    target = f"I={lufs}:TP={true_peak_db}:LRA={lra}"
+    first = parse_loudnorm(_ffmpeg_stderr(["-i", str(src), "-af", f"loudnorm={target}:print_format=json",
+                                           "-f", "null", "-"]))
+    measured = (f"measured_I={first['input_i']}:measured_TP={first['input_tp']}:"
+                f"measured_LRA={first['input_lra']}:measured_thresh={first['input_thresh']}:"
+                f"offset={first['target_offset']}:linear=true")
+    second = parse_loudnorm(_ffmpeg_stderr(["-y", "-i", str(src), "-af",
+                                            f"loudnorm={target}:{measured}:print_format=json",
+                                            "-ar", str(sr), "-c:a", "pcm_s16le", str(dst)]))
+    return {**{k: first[k] for k in ("input_i", "input_tp", "input_lra")},
+            **{k: second[k] for k in ("output_i", "output_tp", "output_lra", "normalization_type")}}

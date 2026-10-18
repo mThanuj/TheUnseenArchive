@@ -71,12 +71,13 @@ llm:
         - { id: openai/gpt-oss-20b, tier: normal, extra_body: { reasoning_effort: low } }
     openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY
       # ":free" models: an account-wide cap (50 requests/day) on all free models plus frequent
-      # upstream limits per model, so several are listed. Ordered by what answered in rounds 7-8:
-      # nemotron-3-ultra was "overloaded" and gemma-4-31b "rate-limited upstream" on every call.
+      # upstream limits per model, so several are listed, all in the normal tier: in rounds 7-9
+      # nemotron-3-ultra was "overloaded", gemma-4-31b "rate-limited upstream" on every call, and
+      # nemotron-3-super answered but spent its whole budget on hidden reasoning (100-166 s per critique).
       url: https://openrouter.ai/api/v1
       key_env: OPENROUTER_API_KEY
       models:
-        - { id: "nvidia/nemotron-3-super-120b-a12b:free", extra_body: { reasoning: { effort: low } } }
+        - { id: "nvidia/nemotron-3-super-120b-a12b:free", tier: normal, extra_body: { reasoning: { effort: low } } }
         - { id: "thinkingmachines/inkling:free", tier: normal }
         - { id: "google/gemma-4-26b-a4b-it:free", tier: normal }
         - { id: "nvidia/nemotron-3-ultra-550b-a55b:free", tier: normal, extra_body: { reasoning: { effort: low } } }
@@ -222,7 +223,8 @@ rules:
   # quoted string, in a video prompt triggers a scene rewrite.
   video_prompt_text_risk: [written, writes, writing, handwritten, handwriting, reads, printout, printed,
                            typed, label, labelled, labeled, headline, inscription, scrawled, spelled,
-                           readout, nameplate, plaque, engraved, engraving, digits, numerals, digital display]
+                           readout, nameplate, plaque, engraved, engraving, digits, numerals, digital display,
+                           newspaper, newspapers, logbook, ledger, poster]
   banned_cliches:
     - it was all a dream
     - the narrator was dead all along

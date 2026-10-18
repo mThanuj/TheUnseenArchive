@@ -343,6 +343,75 @@ def cmd_story_render(args: argparse.Namespace) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ Milestone 3: narration + sound
+
+def cmd_voices(args: argparse.Namespace) -> int:
+    """Render one line in several voices so the narrator can be chosen by ear."""
+    import numpy as np
+    from .audio.config import load_audio_config
+    from .audio.dsp import write_wav
+    from .audio.tts import make_narrator, trim_silence
+    from .config import REPO_ROOT
+    cfg = load_audio_config()
+    voices = [v.strip() for v in args.voices.split(",") if v.strip()] if args.voices else cfg.tts.audition.voices
+    line = args.line or cfg.tts.audition.line
+    speed = args.speed or cfg.tts.speed
+    out = REPO_ROOT / "runs" / "voices" / f"{datetime.now():%Y%m%d-%H%M%S}"
+    narrator = make_narrator()
+    print(f"Voice audition at x{speed:g}: \"{line}\"\n(the first voice also downloads the Kokoro model)")
+    rows = []
+    for v in voices:
+        t0 = time.monotonic()
+        try:
+            r = narrator.synth(line, v, speed)
+        except Exception as exc:   # an unknown voice name must not stop the audition
+            print(f"  {v:12} FAILED: {str(exc)[:160]}")
+            rows.append(f"| {v} | failed: {str(exc)[:80]} | | |")
+            continue
+        x, _ = trim_silence(r.audio, r.sample_rate)
+        peak = float(np.max(np.abs(x))) or 1.0
+        path = write_wav(out / f"{v}.wav", x * (0.9 / peak), r.sample_rate)
+        took = time.monotonic() - t0
+        print(f"  {v:12} {len(x) / r.sample_rate:4.1f} s of speech, made in {took:4.1f} s -> {path}")
+        rows.append(f"| {v}{' (current)' if v == cfg.tts.voice else ''} | `{path.name}` | {len(x) / r.sample_rate:.1f} s "
+                    f"| {took:.1f} s |")
+    (out / "voices.md").parent.mkdir(parents=True, exist_ok=True)
+    (out / "voices.md").write_text(
+        f"# Voice audition\n\nLine: \"{line}\" at x{speed:g}\n\nFolder: `{out}`\n\n"
+        "| voice | file | speech | synthesis time |\n|---|---|---|---|\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    print(f"\nListen to the files in {out} and say which voice the Archivist should have.")
+    return 0
+
+
+def cmd_audio(args: argparse.Namespace) -> int:
+    """Narration + soundscape + loudness-normalised mix for one or more saved stories."""
+    from .audio.config import load_audio_config
+    from .audio.pipeline import render_story_audio
+    from .audio.tts import make_narrator
+    from .story.render import STORIES_DIR, load_story
+    if args.id:
+        ids = [args.id]
+    else:
+        found = sorted(p.parent.name for p in STORIES_DIR.glob("*/story.json"))
+        if not found:
+            print("No stories yet. Create one: uv run unseen story new")
+            return 1
+        ids = found[-args.latest:]
+    cfg = load_audio_config()
+    narrator = make_narrator()
+    failed = 0
+    for story_id in ids:
+        print()
+        try:
+            summary = render_story_audio(load_story(story_id), narrator, cfg, voice=args.voice)
+        except Exception as exc:   # keep going with the other stories
+            failed += 1
+            print(f"ERROR for {story_id}: {exc}")
+            continue
+        print(f"Listen: {summary['files']['mix']}")
+    return 1 if failed else 0
+
+
 def cmd_kaggle_status(args: argparse.Namespace) -> int:
     from .cloud import kaggle as kg
     kg.check_credentials()
@@ -469,6 +538,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout-hours", type=float, default=4.0)
     p.add_argument("--no-wait", action="store_true")
     p.set_defaults(func=cmd_story_render)
+
+    # ---- Milestone 3: narration + sound
+    p = sub.add_parser("voices", help="Milestone 3: render one line in several narrator voices (pick by ear)")
+    p.add_argument("--voices", help="comma-separated Kokoro voice names (default: tts.audition.voices)")
+    p.add_argument("--line", help="text to speak (default: tts.audition.line)")
+    p.add_argument("--speed", type=float, help="speaking speed (default: tts.speed)")
+    p.set_defaults(func=cmd_voices)
+
+    p = sub.add_parser("audio", help="Milestone 3: narration + soundscape + mix for saved stories")
+    p.add_argument("id", nargs="?", help="story id or unique prefix (default: the latest stories)")
+    p.add_argument("--latest", type=int, default=1, help="without an id: narrate this many of the newest stories")
+    p.add_argument("--voice", help="Kokoro voice (default: tts.voice in config/audio.yaml)")
+    p.set_defaults(func=cmd_audio)
 
     p = sub.add_parser("export-workflow", help="write a model's API-format workflow JSON")
     p.add_argument("--model", required=True, choices=models)

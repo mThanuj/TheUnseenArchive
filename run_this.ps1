@@ -28,14 +28,13 @@ $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() 
 # ----------------------------------------------------------------------------------------------
 # THIS ROUND (edited by Claude each round)
 # ----------------------------------------------------------------------------------------------
-$Round = 'M2 round 9: real victims never shown, cleaner prompts, compact rewrites, one story per category'
+$Round = 'M3 round 1: narrator voice audition + narration, soundscape and mix for the 3 newest stories'
 $Steps = @(
     @{ Name = 'tests';          Cmd = 'uv run pytest -q -p no:cacheprovider' },
-    # starts Ollama in the background if it is installed but not running (the last-resort model)
-    @{ Name = 'ollama';         Cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\ensure_ollama.ps1' },
-    @{ Name = 'story-real';     Cmd = 'uv run unseen story new --category real_mystery' },
-    @{ Name = 'story-fiction';  Cmd = 'uv run unseen story new --category fiction_horror' },
-    @{ Name = 'story-psych';    Cmd = 'uv run unseen story new --category psychological_mystery' }
+    # the first run downloads the Kokoro TTS model from Hugging Face (a few hundred MB, once)
+    @{ Name = 'voices';         Cmd = 'uv run unseen voices' },
+    # narrates round 9's three stories (real, fiction, psychological) with the default voice
+    @{ Name = 'audio';          Cmd = 'uv run unseen audio --latest 3' }
 )
 $MaxLinesPerStep = 400
 # ----------------------------------------------------------------------------------------------
@@ -134,14 +133,16 @@ if (-not $SkipPull) {
         & powershell @argsList
         exit $LASTEXITCODE
     }
-    $Results += Invoke-Logged 'uv-sync' 'uv sync' 0
+    $Results += Invoke-Logged 'uv-sync' 'uv sync --extra audio' 0
 } elseif ($AfterUpdate) {
-    $Results += Invoke-Logged 'uv-sync' 'uv sync' 0
+    $Results += Invoke-Logged 'uv-sync' 'uv sync --extra audio' 0
 }
 
 # ---- 2. this round's steps ----------------------------------------------------------------------
 $storiesBefore = Get-Dirs 'runs\stories'
 $benchBefore = Get-Dirs 'bench_results'
+$voicesBefore = Get-Dirs 'runs\voices'
+$stepsStart = Get-Date
 $i = 1
 foreach ($step in $Steps) {
     if ($Only -and -not ($Only -contains $step.Name)) { continue }
@@ -150,6 +151,12 @@ foreach ($step in $Steps) {
 }
 $newStories = @(Get-Dirs 'runs\stories' | Where-Object { $storiesBefore -notcontains $_ })
 $newBench = @(Get-Dirs 'bench_results' | Where-Object { $benchBefore -notcontains $_ })
+$newVoices = @(Get-Dirs 'runs\voices' | Where-Object { $voicesBefore -notcontains $_ })
+$newAudio = @()
+if (Test-Path -LiteralPath 'runs\stories') {
+    $newAudio = @(Get-ChildItem -Path 'runs\stories\*\audio\audio_report.md' -ErrorAction SilentlyContinue |
+                  Where-Object { $_.LastWriteTime -ge $stepsStart } | ForEach-Object { $_.FullName })
+}
 
 # ---- 3. report ----------------------------------------------------------------------------------
 $commit = (git log -1 --format='%h %s' 2>$null)
@@ -200,6 +207,21 @@ foreach ($dir in $newStories) {
         $r += ''
         $r += (Get-Content -LiteralPath $md -Encoding UTF8)
     }
+}
+foreach ($dir in $newVoices) {
+    $md = Join-Path $dir 'voices.md'
+    if (Test-Path -LiteralPath $md) {
+        $r += ''
+        $r += "## New voice audition: $(Split-Path -Leaf $dir)"
+        $r += ''
+        $r += (Get-Content -LiteralPath $md -Encoding UTF8)
+    }
+}
+foreach ($md in $newAudio) {
+    $r += ''
+    $r += "## New audio: $(Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $md)))"
+    $r += ''
+    $r += (Get-Content -LiteralPath $md -Encoding UTF8)
 }
 foreach ($dir in $newBench) {
     $md = Join-Path $dir 'report.md'

@@ -13,8 +13,8 @@ import re
 from .config import StoryConfig
 from .models import Claim, LineFixes, SceneFixes, StoryDraft, StoryPatch
 from .validate import (banned_in, device_mix_issues, first_person_slip, min_cited, readable_text_risk,
-                       sanitize_video_prompt, speech_seconds, uncited_specific, unhedged_lines, victim_shots,
-                       words)
+                       repeated_lines, sanitize_video_prompt, speech_seconds, uncited_specific, unhedged_lines,
+                       victim_shots, words)
 
 OSD_DATE_TIME = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?|"
                            r"\b(?:19|20)\d{2}\b")
@@ -185,6 +185,8 @@ def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
         for c in r.banned_cliches:
             if c.lower() in n.text.lower():
                 add(n.id, f"remove the cliche '{c}'")
+    for i, j in repeated_lines(d).items():
+        add(i, f"repeats line {j}; say something new (the next fact or detail) instead")
     total = sum(s.duration_s for s in d.scenes)
     speech = sum(speech_seconds(n.text, wps) + n.pause_after_s for n in d.narration)
     if speech > total * 1.05:   # still too long after timing fixes: shorten the longest lines

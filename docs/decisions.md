@@ -259,3 +259,40 @@ at once: a real-mystery story was saved without its critique and fact-check. Cha
   muted gray").
 - run_this.ps1 names each story's category (round 8's "story-fiction" step picked a real case at
   random) and shows when Gemini's daily quotas reset.
+
+## M2 closed (2026-10-18)
+
+The story engine does everything M2 set out to do: category rotation and ingredients, research
+with quote-verified claims, concepts rated by a critic, two drafts, critique, rewrite, fact-check,
+honesty/safety rules (reconstruction framing, hedging, no invented evidence, no real victims shown,
+no readable text in shots) and free-model rotation with waiting instead of failing. Remaining
+quality limits are the free writer models: when Gemini's 20 requests/model/day are used up (by
+test rounds), Groq's gpt-oss-120b writes, and its stories are flatter. A daily run needs ~15-20
+requests, well inside the ~100/day the flash models allow. Round 9 also showed OpenRouter's
+nemotron-3-super spends its whole budget on hidden reasoning (100-166 s per critique), so all
+OpenRouter models are now normal tier; repeated narration lines are flagged; a fact-check
+"correction" identical to the line counts as supported.
+
+## M3 design (2026-10-18): narration and sound
+
+- **TTS: Kokoro-82M via the `kokoro` package (PyTorch, CPU).** Code and weights Apache-2.0 (V,
+  GitHub). Chosen over kokoro-onnx because it returns per-word timestamps directly (`token.start_ts`
+  / `end_ts`, V in pipeline.py), which M4's captions need; same model either way. 24 kHz output,
+  resampled to the 48 kHz mix. Kokoro's own quality grades for male voices: am_michael/am_fenrir/
+  am_puck C+, bm_george/bm_fable C (V, kokoro.js voices.js); the voice is picked by ear with
+  `unseen voices`. English G2P is misaki; its fallback for unknown words is espeak-ng (GPL-3.0),
+  loaded as a library: GPL obligations attach to distributing the software, not to generated audio
+  (general understanding, not legal advice).
+- **Packaging:** an optional `audio` extra so Kaggle jobs never install torch. misaki would
+  `spacy download` en_core_web_sm at runtime, which needs pip (absent in uv environments), so the
+  model wheel (3.8.0, requires spaCy 3.8.x) is a direct dependency; torch comes from the CPU index
+  (`explicit = true`, uv's documented pattern).
+- **Timing:** lines are spoken in their scene after a short lead-in, with the script's pauses; a
+  scene whose real narration is longer than planned stretches by up to 1.5 s (M4 holds/slows the
+  clip); lines never overlap across scenes. `timeline.json` carries scene, line and word times.
+- **Soundscape:** all 18 cue names are synthesized with numpy (no samples to license): beds run to
+  the scene's end, one-shots play once, `silence` mutes the ambience until the scene ends, `dropout`
+  cuts it briefly; quiet room tone under every scene; deterministic per story.
+- **Mix:** ambience -10 dB under the narration and ducked 8 dB more while the Archivist speaks;
+  peak -1 dBFS, then ffmpeg loudnorm in two passes to -14 LUFS integrated / -1.5 dBTP (common
+  short-form targets; Instagram publishes no official number, U).

@@ -293,3 +293,15 @@ def test_rewrite_prompt_carries_an_outline_not_the_full_draft(cfg):
     p = revise_prompt(base, draft(), Critique.model_validate(CRITIQUE_WEAK))
     assert PROMPT not in p and "[6] (calm, pause 0.6s) Nobody at the motel owns a camera like hers." in p
     assert "scene 7: ending is flat" in p
+
+
+def test_repeated_narration_lines_are_flagged(cfg):
+    from unseen.story.repair import line_issues
+    from unseen.story.validate import repeated_lines
+    assert repeated_lines(draft()) == {}
+    d = draft()
+    d.narration[1].text = "The 2019 inspection found the vault's interior brickwork intact."
+    d.narration[4].text = "2019 inspection found brickwork intact, no impact signs."
+    assert repeated_lines(d) == {5: 2}
+    assert "repeats line 2" in line_issues(d, cfg, 30, "fiction_horror", None)[5]
+    assert any("line 5 repeats line 2" in p for p in validate_story(d, cfg, 30, "fiction_horror"))

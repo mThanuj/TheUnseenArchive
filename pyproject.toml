@@ -21,6 +21,16 @@ dependencies = [
     "fastembed>=0.5",
 ]
 
+[project.optional-dependencies]
+# Milestone 3 narration (Kokoro TTS on the CPU). Optional so cloud GPU jobs (Kaggle) never install
+# torch; on Windows: `uv sync --extra audio` (run_this.ps1 and setup.ps1 do this).
+audio = [
+    "kokoro>=0.9.4",
+    "torch>=2.4",          # direct dependency so the CPU-only index below applies
+    "spacy>=3.8,<3.9",     # en_core_web_sm 3.8.0 requires spaCy 3.8.x
+    "en-core-web-sm",      # installed up front: misaki would otherwise pip-install it at runtime (no pip in uv envs)
+]
+
 [project.scripts]
 unseen = "unseen.cli:main"
 
@@ -30,6 +40,15 @@ dev = ["pytest>=8.0"]
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true   # only torch comes from here; everything else from PyPI
 
 [tool.hatch.build.targets.wheel]
 packages = ["unseen"]

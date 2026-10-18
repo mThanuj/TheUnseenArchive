@@ -11,8 +11,8 @@ verified on the target machine before the next one starts.
 | Milestone | Scope | Status |
 |---|---|---|
 | **M1** | Generate real AI video clips and measure memory, time, motion, output | **Done**: LTX-Video 13B Q8 on Kaggle T4 (704x1216, 4 s, 18 min/clip); LTX 13B Q3 locally as fallback |
-| M2 | Story engine: concepts, research with sources, scene breakdown (hosted free LLMs, local fallback) | **Implemented, tuning story quality** |
-| M3 | Narration (Kokoro TTS) and procedural soundscape | Not started |
+| M2 | Story engine: concepts, research with sources, scene breakdown (hosted free LLMs, local fallback) | **Done** (quality is best when Gemini's daily quota is fresh) |
+| M3 | Narration (Kokoro TTS) and procedural soundscape, loudness-normalised mix | **Implemented, awaiting first run on Windows** |
 | M4 | Assembly, found-footage looks, subtitles, 1080x1920 encode, validation | Not started |
 | M5 | Daily orchestration: resumable stages, retries, Task Scheduler (Asia/Kolkata) | Not started |
 | M6 | Instagram publishing (official API), disabled by default | Not started |
@@ -36,6 +36,25 @@ clipboard: paste it into the chat. `-Only name1,name2` runs a subset of the step
 Windows 11, NVIDIA RTX 3050 Laptop GPU (4 GB VRAM), 16 GB RAM, Intel i5-12450H.
 Needs: NVIDIA driver supporting **CUDA 13.0+** (check the top-right of `nvidia-smi`), Git, FFmpeg,
 about **30 GB free disk**, and internet for the first setup.
+
+## Milestone 3: narration and sound
+
+Turns a saved story into audio: every narration line spoken by Kokoro-82M (Apache-2.0, runs on the
+CPU), placed in its scene with the script's pauses; a procedural soundscape from the scene's sound
+cues (room tone, hum, wind, drips, knocks, doors... all synthesized, nothing to license); the
+ambience ducks under the narrator; the mix is normalised to -14 LUFS / -1.5 dBTP with ffmpeg.
+
+```powershell
+uv sync --extra audio                  # TTS packages (torch CPU, kokoro, spaCy English model)
+uv run unseen voices                   # one line in 9 voices -> runs\voices\<time>\*.wav; pick by ear
+uv run unseen audio --latest 3         # narrate the 3 newest stories (or: uv run unseen audio <story id>)
+```
+
+Outputs in `runs\stories\<id>\audio\`: `mix.wav` (listen to this), `narration.wav`,
+`soundscape.wav`, `timeline.json` (scene, line and word times for M4's cuts and captions),
+`audio_report.md`. Voice, speed, levels and every sound's volume are in `config/audio.yaml`.
+The first run downloads the Kokoro model from Hugging Face. Kokoro's pronunciation fallback for
+unknown words is espeak-ng (GPL-3.0), used as an installed library; the generated audio is ours.
 
 ## Milestone 2: story engine
 

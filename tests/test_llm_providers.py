@@ -195,9 +195,8 @@ def test_best_models_of_every_provider_come_before_normal_ones(monkeypatch, no_k
     tiers = [p.tier for p in slots]
     assert tiers == sorted(tiers) and slots[-1].name == "ollama"
     gemini = [p.model for p in slots if p.name == "gemini"]
-    # configured names the key doesn't list (gemma-4-26b-a4b-it here) are dropped
-    assert gemini == ["gemini-2.5-pro", "gemini-3.8-flash", "gemini-3.7-flash", "gemma-4-31b-it",
-                      "gemini-3.1-flash-lite"]
+    # configured names the key doesn't list (gemma-4-26b-a4b-it here) are dropped; pro is not configured
+    assert gemini == ["gemini-3.8-flash", "gemini-3.7-flash", "gemma-4-31b-it", "gemini-3.1-flash-lite"]
     best = [p for p in slots if p.tier == 0]
     order = [cfg.chain.index(p.name) for p in best]
     assert order == sorted(order)          # within a tier: provider by provider, in chain order
