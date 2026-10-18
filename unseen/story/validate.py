@@ -99,6 +99,28 @@ def first_person_slip(text: str) -> bool:
     return bool(FIRST_PERSON.search(text))
 
 
+# times, dates, counts: the details a model invents to sound documentary ("one" is left out: "no one")
+SPECIFIC = re.compile(r"\d|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|"
+                      r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|o'clock)\b|\b[ap]\.m\.",
+                      re.IGNORECASE)
+
+
+def uncited_specific(line) -> bool:
+    """Real cases: a narration line with a time/number/count but no claim behind it."""
+    return not line.claim_ids and bool(SPECIFIC.search(line.text))
+
+
+def min_cited(d: StoryDraft) -> int:
+    """Real cases: at least two thirds of the narration lines must cite claims."""
+    return max(1, (2 * len(d.narration)) // 3)
+
+
+def expected_scenes(cfg: StoryConfig, target_seconds: int) -> int:
+    """One generated clip per scene of about `typical` seconds (also the per-Reel GPU budget)."""
+    ln = cfg.length
+    return max(3, min(ln.max_scenes, round(target_seconds / ln.scene_seconds.typical)))
+
+
 def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, category: str,
                    claims: list[Claim] | None = None, event_year: int | None = None) -> list[str]:
     r, length = cfg.rules, cfg.length
@@ -125,6 +147,9 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
     # scenes and coverage
     if len(d.scenes) > length.max_scenes:
         problems.append(f"{len(d.scenes)} scenes; max {length.max_scenes}")
+    want = expected_scenes(cfg, target_seconds)
+    if len(d.scenes) < want - 1:
+        problems.append(f"only {len(d.scenes)} scenes; a {target_seconds} s Reel needs {want} (one clip per scene)")
     covered = Counter(i for s in d.scenes for i in s.narration_ids)
     for i in ids:
         if covered[i] == 0:
@@ -187,7 +212,9 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
             if tags & {"disputed", "theory", "legend"} and not banned_in(n.text, cfg.real_mystery.hedge_words):
                 problems.append(f"narration line {n.id} states a {'/'.join(sorted(tags - {'fact'}))} claim as fact; "
                                 f"hedge it (e.g. 'reportedly', 'some believe', 'according to')")
-        if cited < max(1, len(d.narration) // 2):
+            if uncited_specific(n):
+                problems.append(f"narration line {n.id} states a specific detail without citing a claim")
+        if cited < min_cited(d):
             problems.append(f"only {cited} of {len(d.narration)} narration lines cite claims; factual lines "
                             f"must cite the claim ids they rely on")
     return problems

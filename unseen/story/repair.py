@@ -12,8 +12,8 @@ import re
 
 from .config import StoryConfig
 from .models import Claim, LineFixes, SceneFixes, StoryDraft, StoryPatch
-from .validate import (banned_in, first_person_slip, readable_text_risk, sanitize_video_prompt,
-                       speech_seconds, words)
+from .validate import (banned_in, first_person_slip, min_cited, readable_text_risk, sanitize_video_prompt,
+                       speech_seconds, uncited_specific, words)
 
 OSD_DATE_TIME = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?|"
                            r"\b(?:19|20)\d{2}\b")
@@ -109,11 +109,15 @@ def fit_video_prompts(d: StoryDraft, cfg: StoryConfig) -> list[str]:
     return fixes
 
 
+FILM_DEVICES = {"film_8mm", "film_16mm"}
+
+
 def clean_osd(d: StoryDraft) -> list[str]:
-    """Overlay keeps only the camera label; consistent dates/times are rendered later from recorded_year."""
+    """Overlay keeps only the camera label; consistent dates/times are rendered later from recorded_year.
+    Film has no overlay at all."""
     fixes = []
     for s in d.scenes:
-        label = re.sub(r"\s{2,}", "  ", OSD_DATE_TIME.sub("", s.osd)).strip(" -|")
+        label = "" if s.device in FILM_DEVICES else re.sub(r"\s{2,}", "  ", OSD_DATE_TIME.sub("", s.osd)).strip(" -|")
         if label != s.osd:
             fixes.append(f"scene {s.id} osd '{s.osd}' -> '{label}'")
             s.osd = label
@@ -195,11 +199,31 @@ def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
                           + "/".join(sorted(tags - {"fact"})) + " claim")
             if any(c not in by_id for c in n.claim_ids):
                 add(n.id, "uses unknown claim ids; cite only the listed claims")
-        if len(cited) < max(1, len(d.narration) // 2):
+            if uncited_specific(n):
+                add(n.id, "states a specific (time, number, count) without citing a claim: cite the claim it "
+                          "comes from or remove the detail; never invent specifics")
+        if len(cited) < min_cited(d):
             for n in d.narration:
                 if not n.claim_ids:
                     add(n.id, "cite the claim ids this line relies on (or make it purely atmospheric)")
     return {i: "; ".join(v) for i, v in issues.items()}
+
+
+HEDGE_SUFFIX = {"legend": "according to legend", "theory": "according to one theory", "disputed": "reportedly"}
+
+
+def hedge_lines(d: StoryDraft, cfg: StoryConfig, claims: list[Claim] | None) -> list[str]:
+    """Real cases, last resort after the LLM repair: a line resting on a legend/theory/disputed claim
+    that still reads as fact gets an explicit hedge appended."""
+    by_id = {c.id: c for c in claims or []}
+    fixed = []
+    for n in d.narration:
+        tags = {by_id[c].tag for c in n.claim_ids if c in by_id}
+        weak = [t for t in ("legend", "theory", "disputed") if t in tags]
+        if weak and not banned_in(n.text, cfg.real_mystery.hedge_words):
+            n.text = f"{n.text.rstrip(' .!')}, {HEDGE_SUFFIX[weak[0]]}."
+            fixed.append(f"line {n.id} -> {n.text}")
+    return fixed
 
 
 def apply_line_fixes(d: StoryDraft, fixes: LineFixes, wanted: set[int], category: str) -> list[str]:

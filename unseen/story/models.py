@@ -135,8 +135,8 @@ class Scene(BaseModel):
     lighting: str = Field(description="light sources and colour, max 12 words")
     continuity: str = Field(description="link to the previous shot, max 15 words")
     video_prompt: str = Field(description="final text-to-video prompt, one literal paragraph, 45-130 words")
-    osd: str = Field(default="", description="camera label only, e.g. 'CAM 03' or 'REC' (dates and times are "
-                                             "added automatically from recorded_year)")
+    osd: str = Field(default="", description="camera label only, e.g. 'CAM 03' or 'REC'; empty for film (dates "
+                                             "and times are added automatically from recorded_year)")
     sfx: list[SfxCue] = Field(default_factory=list, max_length=3)
 
 

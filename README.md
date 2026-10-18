@@ -11,7 +11,7 @@ verified on the target machine before the next one starts.
 | Milestone | Scope | Status |
 |---|---|---|
 | **M1** | Generate real AI video clips and measure memory, time, motion, output | **Done**: LTX-Video 13B Q8 on Kaggle T4 (704x1216, 4 s, 18 min/clip); LTX 13B Q3 locally as fallback |
-| M2 | Story engine: concepts, research with sources, scene breakdown (local LLM) | **Implemented, awaiting first run on Windows** |
+| M2 | Story engine: concepts, research with sources, scene breakdown (hosted free LLMs, local fallback) | **Implemented, tuning story quality** |
 | M3 | Narration (Kokoro TTS) and procedural soundscape | Not started |
 | M4 | Assembly, found-footage looks, subtitles, 1080x1920 encode, validation | Not started |
 | M5 | Daily orchestration: resumable stages, retries, Task Scheduler (Asia/Kolkata) | Not started |
@@ -52,7 +52,7 @@ theories/legends must be hedged. Sources (URL, revision, license) are stored wit
 winget install Ollama.Ollama                     # local LLM runtime (runs in the background)
 git pull; uv sync
 uv run pytest
-uv run unseen llm-setup                          # pulls Gemma 4 12B (~7 GB, Apache-2.0) and measures speed
+uv run unseen llm-setup                          # pulls Gemma 4 E4B (~5 GB, Apache-2.0) and measures speed
 uv run unseen story new                          # random category (~10-25 min on CPU)
 uv run unseen topics                             # checks every real-mystery Wikipedia title
 uv run unseen story new --category real_mystery  # or --topic max_headroom (see config/topics.yaml)
@@ -61,12 +61,14 @@ uv run unseen story show <id>                    # same as runs\stories\<id>\sto
 uv run unseen story render <id> --kaggle         # renders every scene at 512x768x49 (preview) on Kaggle
 ```
 
-Optional but recommended: free API keys make story writing far faster than the laptop (~4 tok/s,
-15-30 min per story). Add any of `GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY` to `.env`;
-providers are tried in the order of `llm.chain` in `config/story.yaml` (keyless ones are skipped,
-the local model is the last fallback). `uv run unseen llm-setup` speed-tests each one and
-`uv run unseen llm-models --provider groq` lists valid model names. Free-tier limits and data-use
-terms are the providers' own.
+Optional but recommended: free API keys make story writing far faster and better than the laptop.
+Add any of the keys listed in `.env.example` (each line links to the signup page). Every provider
+lists several models in `config/story.yaml`; the engine uses every provider's best models first
+(rotating to the next model of the same provider when one hits its free limit, then to the next
+provider), then the normal tier, and only then the small local model. When all hosted models are
+limited at once it waits up to 5 minutes for one to free up. `uv run unseen llm-setup` shows each
+provider's rotation and speed; `uv run unseen llm-models --provider groq` lists the models your key
+can use. Free-tier limits and data-use terms are the providers' own.
 
 Outputs per story in `runs\stories\<id>\`: `story.md` (read this), `story.json` (full record),
 `prompts.json` (scene video prompts). State is kept in `state\unseen.db`.
@@ -183,7 +185,7 @@ config/            runtime.yaml (pinned ComfyUI), models.yaml (weights + sha256 
 unseen/            Python package (CLI: `uv run unseen ...`)
   comfy/           private headless ComfyUI: process control, API client, workflow builders
   bench/           Milestone 1 benchmark: runner, resource monitor, motion metrics, report
-scripts/windows/   setup.ps1
+scripts/windows/   setup.ps1, ensure_ollama.ps1 (starts the local LLM server if it isn't running)
 tests/             CPU-only unit tests
 docs/decisions.md  architecture decisions, research evidence, licensing, risks
 runtime/ models/ bench_results/   created locally (git-ignored, except benchmark reports)

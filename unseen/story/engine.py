@@ -22,9 +22,9 @@ from typing import Callable
 
 import numpy as np
 
-from ..llm.base import LLMError, generate
+from ..llm.base import LLMError, expand_model_pattern, generate
 from ..state.db import StateDB
-from .config import LLMCfg, StoryConfig, Topic, load_story_config, load_topics
+from .config import LLMCfg, ModelEntry, StoryConfig, Topic, load_story_config, load_topics
 from .models import (Claim, ClaimList, Concept, ConceptList, ConceptRatings, Critique, FactCheck, LineFixes,
                      SceneFixes, Source, StoryDraft, StoryPatch, StoryRecord)
 from .novelty import Embedder, FastEmbedder, concept_text, max_similarity
@@ -32,45 +32,83 @@ from .prompts import (claims_prompt, concept_rating_prompt, concepts_prompt, cri
                       line_repair_prompt, patch_prompt, revise_prompt, scene_repair_prompt, script_prompt,
                       system_prompt)
 from .render import save_story
-from .repair import apply_line_fixes, apply_patch, apply_scene_fixes, auto_fix, line_issues, scene_issues
+from .repair import (apply_line_fixes, apply_patch, apply_scene_fixes, auto_fix, hedge_lines, line_issues,
+                     scene_issues)
 from .research import ResearchError, fetch_article, trim_source
 from .validate import validate_story, verify_claims
 
 Log = Callable[[str], None]
 
 
-def build_provider(cfg: LLMCfg, name: str):
+def build_provider(cfg: LLMCfg, name: str, entry: ModelEntry | None = None):
+    """One provider object for `name`, using `entry` (default: its first configured model)."""
     if name == "ollama":
         from ..llm.ollama import OllamaProvider
         return OllamaProvider(cfg.ollama.url, cfg.ollama.model, cfg.ollama.num_ctx, cfg.ollama.timeout_s,
                               think=cfg.ollama.think)
     if name == "gemini":
         from ..llm.gemini import GeminiProvider
-        return GeminiProvider(cfg.gemini.url, cfg.gemini.model, cfg.gemini.timeout_s,
+        return GeminiProvider(cfg.gemini.url, (entry or cfg.gemini.models[0]).id, cfg.gemini.timeout_s,
                               thinking_budget=cfg.gemini.thinking_budget,
                               max_output_tokens=cfg.gemini.max_output_tokens)
     if name in cfg.openai_compat:
         from ..llm.openai_compat import OpenAICompatProvider
         c = cfg.openai_compat[name]
-        return OpenAICompatProvider(name, c.url, c.model, c.key_env, c.timeout_s, c.extra_body)
+        e = entry or c.models[0]
+        return OpenAICompatProvider(name, c.url, e.id, c.key_env, c.timeout_s, {**c.extra_body, **e.extra_body})
     known = ["ollama", "gemini", *cfg.openai_compat]
     raise ValueError(f"unknown LLM provider {name!r}; configured: {known}")
 
 
+TIERS = {"best": 0, "normal": 1}
+
+
+def provider_models(cfg: LLMCfg, name: str) -> list:
+    """One provider object per configured model of `name`, in order, each tagged with its tier.
+
+    '*' patterns are expanded against the models the key can use (one listing call); when a listing
+    is available, configured names the key doesn't offer are dropped."""
+    probe = build_provider(cfg, name)   # raises LLMError when the API key is missing
+    if name == "ollama":
+        probe.tier = TIERS["normal"]
+        return [probe]
+    entries = cfg.gemini.models if name == "gemini" else cfg.openai_compat[name].models
+    available = probe.list_models() if any("*" in e.id for e in entries) else None
+    expanded: list[ModelEntry] = []
+    for e in entries:
+        ids = expand_model_pattern(e.id, available) if "*" in e.id else [e.id]
+        for i in ids:
+            if (available is None or i in available) and i not in {x.id for x in expanded}:
+                expanded.append(e.model_copy(update={"id": i}))
+    if not expanded:
+        raise LLMError(f"{name}: none of the configured models ({', '.join(e.id for e in entries)}) is "
+                       f"available to this key; see `uv run unseen llm-models --provider {name}`")
+    slots = []
+    for e in expanded:
+        p = build_provider(cfg, name, e)
+        p.tier = TIERS[e.tier]
+        slots.append(p)
+    return slots
+
+
 def make_provider(cfg: LLMCfg, name: str | None = None, log: Log = print):
-    """One named provider, or the configured chain minus providers without API keys."""
-    if name:
-        return build_provider(cfg, name)
+    """The configured chain (or one provider's models): best tier first, provider by provider,
+    then the normal tier; providers without API keys are skipped."""
     from ..llm.fallback import FallbackProvider
-    providers = []
-    for n in cfg.chain:
+    slots = []
+    for n in [name] if name else cfg.chain:
         try:
-            providers.append(build_provider(cfg, n))
+            slots += provider_models(cfg, n)
         except LLMError as exc:
+            if name:
+                raise
             log(f"  LLM provider {n} skipped: {exc}")
-    if len(providers) == 1:
-        return providers[0]
-    return FallbackProvider(providers, log)
+    if not slots:
+        raise LLMError("no LLM provider is available")
+    slots.sort(key=lambda p: p.tier)   # stable: chain order and model order kept within a tier
+    if len(slots) == 1:
+        return slots[0]
+    return FallbackProvider(slots, log, cooldown_s=cfg.cooldown_s, max_wait_s=cfg.max_wait_s)
 
 
 def slugify(text: str, n: int = 32) -> str:
@@ -98,6 +136,8 @@ class StoryEngine:
         self.fetch = fetch
         self.stats: list[dict] = []
         self.event_year: int | None = None   # real mysteries: the case's year (era checks)
+        self.category: str | None = None
+        self.topic: Topic | None = None
 
     # --------------------------------------------------------------- choices
     @property
@@ -184,8 +224,8 @@ class StoryEngine:
     def _gen(self, model_cls, *, user: str, name: str, temperature: float, max_tokens: int, check=None,
              retries: int | None = None, provider=None):
         obj, stats, problems = generate(
-            provider or self.provider, model_cls, system=system_prompt(self.cfg), user=user, name=name,
-            temperature=temperature, max_tokens=max_tokens,
+            provider or self.provider, model_cls, system=system_prompt(self.cfg, self.category), user=user,
+            name=name, temperature=temperature, max_tokens=max_tokens,
             max_retries=self.cfg.llm.max_retries if retries is None else retries,
             check=check, log=self.log)
         self.stats.append(stats.as_dict())
@@ -288,8 +328,10 @@ class StoryEngine:
                 break
             cand_p = self.checks(cand, target, category, claims)
             # each unresolved automatic check costs half a point: an anachronism or an unsupported fact
-            # should not win just because the prose scored slightly higher
-            better = self._avg(c) - 0.5 * len(cand_p) > self._avg(best_c) - 0.5 * len(best_p)
+            # should not win just because the prose scored slightly higher; and a rewrite may never add
+            # failed checks (e.g. dropping scenes so the Reel falls short of its length)
+            better = (self._avg(c) - 0.5 * len(cand_p) > self._avg(best_c) - 0.5 * len(best_p)
+                      and len(cand_p) <= len(best_p))
             history.append({"round": rnd, "scores": c.scores(), "avg": self._avg(c), "checks": len(cand_p),
                             "kept": better})
             self.log(f"  revision {rnd}: avg {self._avg(best_c)} -> {self._avg(c)}, checks {len(best_p)} -> "
@@ -299,14 +341,15 @@ class StoryEngine:
         return best, best_c, revised, history
 
     def critic_provider(self):
-        """Other hosted models than the writer, in preference order (models grade themselves kindly).
+        """Another hosted model than the writer, preferably from another provider (models grade their
+        own work kindly).
 
         Returned as a fallback view that shares cool-downs with the writer's chain; the local model
         is left out because an extra pass on the laptop CPU costs minutes."""
         from ..llm.fallback import FallbackProvider
         p = self.provider
         if isinstance(p, FallbackProvider):
-            view = p.excluding({p.name, "ollama"})
+            view = p.critic_view()
             if view is not None:
                 return view
         return p
@@ -356,8 +399,10 @@ class StoryEngine:
     def polish(self, draft: StoryDraft, target: int, category: str, claims: list[Claim] | None,
                rounds: int = 2) -> None:
         """Deterministic fixes, then LLM rewrites of only the offending scenes and narration lines."""
-        if category == "real_mystery" and not draft.archive_entry.upper().startswith("RECONSTRUCTION"):
-            draft.archive_entry = f"RECONSTRUCTION - {draft.archive_entry}"   # never pose as real evidence
+        if category == "real_mystery":
+            # never pose as real evidence, and name the documented case (not a theory or an invented file)
+            case = f"{self.topic.wikipedia} ({self.topic.year})" if self.topic else draft.archive_entry
+            draft.archive_entry = f"RECONSTRUCTION - {case}"
         for _ in range(rounds):
             fixes = auto_fix(draft, self.cfg, target)
             if fixes:
@@ -383,9 +428,15 @@ class StoryEngine:
                 fixes_obj, _ = self._gen(LineFixes, name="repair", temperature=0.5, max_tokens=1200,
                                          user=line_repair_prompt(self.cfg, draft, issues, category, claims))
             except LLMError as exc:
-                self.log(f"  line repair failed: {exc}")
-                return
-            apply_line_fixes(draft, fixes_obj, set(issues), category)
+                self.log(f"  line repair failed: {str(exc)[:200]}")
+                break
+            changed = apply_line_fixes(draft, fixes_obj, set(issues), category)
+            self.log("  repaired: " + (", ".join(changed) if changed else
+                                       f"nothing usable (returned ids {[f.id for f in fixes_obj.lines]})"))
+        if category == "real_mystery":
+            hedged = hedge_lines(draft, self.cfg, claims)
+            if hedged:
+                self.log("  hedged: " + "; ".join(hedged))
         auto_fix(draft, self.cfg, target)
 
     # --------------------------------------------------------------- pipeline
@@ -406,14 +457,17 @@ class StoryEngine:
         category = category or ("real_mystery" if topic_id else self.pick_category())
         if category not in self.cfg.categories:
             raise ValueError(f"unknown category {category!r}; choose from {sorted(self.cfg.categories)}")
+        self.category = category
         target = target_seconds or self.pick_length()
         ingredients = {} if category == "real_mystery" else self.sample_ingredients(target)
         topic, claims, sources = None, None, []
         self.event_year = None
+        self.topic = None
         if category == "real_mystery":
             topic, claims, source = self.research_some_topic(topic_id)
             sources = [source]
             self.event_year = topic.year
+            self.topic = topic
         self.log(f"New story: {category}, ~{target} s" + (f", topic {topic.id}" if topic else
                                                           f", ingredients {ingredients}"))
 
@@ -459,6 +513,8 @@ class StoryEngine:
         unsupported = [e for e in fact_report if e.get("verdict") in ("unsupported", "contradicted")
                        and "corrected" not in e]
         problems += [f"narration line {e['id']} is not supported by its claims (fact-check)" for e in unsupported]
+        if any(e.get("verdict") == "not checked" for e in fact_report):
+            problems.append("the independent fact-check could not run (no model answered); re-check before use")
 
         created = datetime.now()
         story_id = f"{created:%Y%m%d-%H%M%S}-{slugify(draft.title)}"

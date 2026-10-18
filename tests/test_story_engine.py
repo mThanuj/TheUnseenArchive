@@ -260,3 +260,34 @@ def test_ingredients_keep_concepts_simple(env):
     assert not any("structure" in i for i in short)
     assert any("structure" in i for i in long) and not all("structure" in i for i in long)
     assert any("twist" in i for i in short) and not all("twist" in i for i in short)
+
+
+def test_rewrite_that_adds_failed_checks_is_discarded(env):
+    short = draft_dict(ending_note="Shorter.")
+    short["scenes"] = short["scenes"][:3]          # scores better but drops most of the Reel's scenes
+    provider = FakeProvider({"ConceptList": [CONCEPTS], "StoryDraft": [draft_dict(), short],
+                             "Critique": [CRITIQUE_WEAK, CRITIQUE_PASS]})
+    engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=8,
+                         log=lambda m: None)
+    single_draft(engine, rounds=1)
+    record, _ = engine.new_story(category="fiction_horror", target_seconds=30)
+    assert not record.revised and len(record.draft.scenes) == 7
+    assert [h["kept"] for h in record.critique_history] == [True, False]
+
+
+def test_real_case_names_the_case_and_flags_a_missing_fact_check(env):
+    d = draft_dict()
+    for n in d["narration"]:
+        n["claim_ids"] = [1]
+    d["recorded_year"] = 1985
+    d["archive_entry"] = "Dust Combustion file 7"
+    provider = FakeProvider({"ClaimList": [CLAIMS], "ConceptList": [CONCEPTS], "StoryDraft": [d],
+                             "Critique": [CRITIQUE_PASS]})       # no FactCheck answer: the check can't run
+    topic = Topic(id="example", wikipedia="Example lights", year=1981, kind="lights", sensitivity="low")
+    engine = StoryEngine(provider=provider, db=StateDB(env / "t.db"), embedder=FakeEmbedder(), seed=3,
+                         fetch=fake_fetch, topics=[topic], log=lambda m: None)
+    single_draft(engine)
+    record, _ = engine.new_story(category="real_mystery", target_seconds=30)
+    assert record.draft.archive_entry == "RECONSTRUCTION - Example lights (1981)"
+    assert any("fact-check could not run" in p for p in record.problems)
+    assert engine.db.get(record.id)["status"] == "draft_with_problems"

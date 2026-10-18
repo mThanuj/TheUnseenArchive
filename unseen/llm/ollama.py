@@ -12,7 +12,7 @@ from typing import Callable
 
 import httpx
 
-from .base import LLMError, schema_guide
+from .base import LLMError, ProviderLLMError, schema_guide
 
 Log = Callable[[str], None]
 
@@ -109,6 +109,9 @@ class OllamaProvider:
                     if chunk.get("done"):
                         final = chunk
                         break
+        except httpx.ConnectError:
+            raise ProviderLLMError(f"Ollama is not running at {self.url}: start the Ollama app (or run "
+                                   f"`ollama serve`) to use the local model") from None
         except httpx.HTTPError as exc:
             raise LLMError(f"Ollama request failed: {exc!r}") from None
         usage = {"prompt_tokens": final.get("prompt_eval_count"), "output_tokens": final.get("eval_count"),

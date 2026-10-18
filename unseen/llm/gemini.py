@@ -14,7 +14,30 @@ import re
 
 import httpx
 
-from .base import LLMError, TransientLLMError, retry_after_seconds
+from .base import LLMError, ProviderLLMError, SkipCallLLMError, TransientLLMError, retry_after_seconds
+
+
+def quota_error(model: str, r) -> TransientLLMError:
+    """429 -> which limit (per minute / per day, from QuotaFailure) and when to retry (RetryInfo)."""
+    try:
+        err = r.json().get("error") or {}
+    except ValueError:
+        err = {}
+    retry = retry_after_seconds(r.headers)
+    quotas = []
+    for d in err.get("details") or []:
+        kind = d.get("@type", "")
+        if kind.endswith("QuotaFailure"):
+            quotas += [f"{v.get('quotaId', '?')}={v.get('quotaValue', '?')}" for v in d.get("violations") or []]
+        elif kind.endswith("RetryInfo"):
+            m = re.match(r"([\d.]+)s", str(d.get("retryDelay", "")))
+            if m:
+                retry = float(m.group(1))
+    message = str(err.get("message") or r.text)
+    # "limit: 0" = this model has no free tier for the key: as good as a used-up daily quota
+    daily = any("PerDay" in q for q in quotas) or bool(re.search(r"limit:\s*0\b", message))
+    what = ", ".join(quotas) or message[:160]
+    return TransientLLMError(f"gemini {model}: free-tier limit ({what})", retry, daily=daily)
 
 
 class GeminiProvider:
@@ -33,6 +56,7 @@ class GeminiProvider:
         # Thinking tokens count against maxOutputTokens: unbounded thinking truncated long scripts.
         self.thinking_budget = thinking_budget
         self.max_output_tokens = max_output_tokens
+        self.json_mode = True   # responseMimeType JSON; switched off for models without it (Gemma)
         self.log = print
 
     def list_models(self) -> list[str]:
@@ -46,18 +70,6 @@ class GeminiProvider:
         return sorted(m["name"].removeprefix("models/") for m in r.json().get("models", [])
                       if "generateContent" in m.get("supportedGenerationMethods", []))
 
-    def auto_candidates(self, include_pro: bool = False) -> list[str]:
-        """Stable 'gemini-X.Y-flash' models newest first (no lite/image/preview); with include_pro,
-        stable '-pro' models are tried before them."""
-        def stable(kind: str) -> list[str]:
-            found = []
-            for name in self.list_models():
-                m = re.fullmatch(rf"gemini-(\d+)(?:\.(\d+))?-{kind}", name)
-                if m:
-                    found.append(((int(m.group(1)), int(m.group(2) or 0)), name))
-            return [n for _, n in sorted(found, reverse=True)]
-        return (stable("pro") if include_pro else []) + stable("flash")
-
     def _post(self, model: str, body: dict) -> httpx.Response:
         try:
             return httpx.post(f"{self.url}/models/{model}:generateContent", json=body,
@@ -67,8 +79,9 @@ class GeminiProvider:
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:
-        config = {"temperature": temperature, "responseMimeType": "application/json",
-                  "maxOutputTokens": max(max_tokens, self.max_output_tokens)}
+        config = {"temperature": temperature, "maxOutputTokens": max(max_tokens, self.max_output_tokens)}
+        if self.json_mode:
+            config["responseMimeType"] = "application/json"
         if self.thinking_budget is not None:
             config["thinkingConfig"] = {"thinkingBudget": self.thinking_budget}
         body = {
@@ -77,32 +90,29 @@ class GeminiProvider:
                                                               f"this JSON Schema:\n{json.dumps(schema)}"}]}],
             "generationConfig": config,
         }
-        # model 'auto': newest stable Flash model the key can actually use (404/403/429 -> next one)
-        auto = self.model in ("auto", "auto-pro")
-        candidates = self.auto_candidates(self.model == "auto-pro") if auto else [self.model]
-        if not candidates:
-            raise LLMError("gemini: no gemini-X.Y-flash model available to this key; set llm.gemini.model")
-        r = None
-        for model in candidates:
-            for _ in range(2):
-                r = self._post(model, body)
-                if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in config:
-                    config.pop("thinkingConfig")   # model without a thinking budget setting
-                    self.thinking_budget = None
-                    continue
-                break
-            if auto and r.status_code in (403, 404, 429) and model != candidates[-1]:
-                continue   # not on this key's free tier: try the next newest
-            if auto and r.status_code == 200:
-                self.model = model
-                self.log(f"  gemini model auto-selected: {model}")
+        for _ in range(3):
+            r = self._post(self.model, body)
+            low = r.text.lower() if r.status_code == 400 else ""
+            if "thinking" in low and "thinkingConfig" in config:
+                config.pop("thinkingConfig")   # model without a thinking budget setting
+                self.thinking_budget = None
+                continue
+            if "json" in low and "responseMimeType" in config:
+                config.pop("responseMimeType")   # e.g. Gemma: no JSON mode; the prompt + validation suffice
+                self.json_mode = False
+                continue
             break
         if r.status_code == 429:
-            raise TransientLLMError("Gemini free-tier rate limit reached", retry_after_seconds(r.headers))
+            raise quota_error(self.model, r)
         if r.status_code in (500, 502, 503, 504):
             raise TransientLLMError(f"Gemini temporarily unavailable ({r.status_code}): {r.text[:160]}")
-        if r.status_code == 404:
-            raise LLMError(f"gemini: model '{self.model}' not found; run `uv run unseen llm-models --provider gemini`")
+        if r.status_code == 401 or (r.status_code == 400 and "api key" in r.text.lower()):
+            raise ProviderLLMError(f"gemini: API key rejected ({r.status_code}); check GEMINI_API_KEY in .env")
+        if r.status_code in (403, 404):
+            raise LLMError(f"gemini: model '{self.model}' is not available to this key ({r.status_code}); "
+                           f"see `uv run unseen llm-models --provider gemini`")
+        if r.status_code == 400:   # request-specific (e.g. too long): other calls may work
+            raise SkipCallLLMError(f"gemini {self.model} returned 400: {r.text[:300]}")
         if r.status_code != 200:
             raise LLMError(f"Gemini returned {r.status_code}: {r.text[:800]}")
         d = r.json()
@@ -110,7 +120,8 @@ class GeminiProvider:
             cand = d["candidates"][0]
             text = "".join(p.get("text", "") for p in cand["content"]["parts"] if not p.get("thought"))
         except (KeyError, IndexError):
-            raise LLMError(f"Gemini returned no content: {json.dumps(d)[:800]}") from None
+            # blocked prompt / safety stop: this request only, the model stays usable
+            raise SkipCallLLMError(f"Gemini returned no content: {json.dumps(d)[:400]}") from None
         meta = d.get("usageMetadata") or {}
         return text, {"prompt_tokens": meta.get("promptTokenCount"),
                       "output_tokens": meta.get("candidatesTokenCount"),

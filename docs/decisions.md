@@ -178,3 +178,47 @@ and a moving object scores high. Thresholds are provisional until calibrated on 
   reconstruction, AI-generated". Single-source (Wikipedia) for now; multi-source corroboration is a
   later improvement.
 - **Brand device:** every story is an archive entry narrated by "the Archivist".
+
+## M2 update (2026-10-18): hosted models first, rotated per model
+
+Observed on the target machine (round 6): free tiers limit per model and per minute/day. Gemini
+returned 429 after one or two calls per model, Groq's per-minute token caps (8k on gpt-oss-120b,
+6k on qwen3.8-27b) rejected or delayed long script calls, OpenRouter's free models were rate-limited
+upstream, and Ollama was not running. With one model per provider, every provider was cooling down
+at once: a real-mystery story was saved without its critique and fact-check. Changes:
+
+- **Slots, not providers.** Each provider lists several models (`models:` in config/story.yaml;
+  `*` = version number, expanded against the key's model list, newest first). Order: every
+  provider's **best** models (provider by provider, each provider's models top to bottom), then the
+  **normal** tier the same way, then the local model. A per-minute limit cools one model down for
+  the time the API names (Gemini RetryInfo, Groq "try again in", Retry-After) and the next model is
+  used; a used-up daily quota (Gemini `...PerDay...` / "limit: 0", Groq TPD/RPD) skips the model for
+  the run; OpenRouter's account-wide `free-models-per-day` skips all its free models; a request too
+  large for one model's per-minute cap, or a blocked prompt, skips that model for that call only; a
+  rejected key or a stopped Ollama skips the provider.
+- **Wait before falling back locally.** When every hosted model is cooling down, a call waits up to
+  `max_wait_s` (300 s) for the first one to free up. The daily run has hours; quality matters more.
+- **Local model:** `hf.co/google/gemma-4-E4B-it-qat-q4_0-gguf` (Gemma 4 E4B, 4.5B effective
+  parameters, official QAT q4_0, Apache-2.0, ungated, 5.15 GB; V via HF API in round 1) replaces
+  the 12B: it is only the last resort, so speed beats polish. `scripts/windows/ensure_ollama.ps1`
+  starts Ollama if installed but not running.
+- **Integrity of real cases (from the Hessdalen draft):** the concept/script prompts no longer ask
+  real cases for an invented "rewatch clue"; concepts are angles on the documented case, never a
+  theory as premise; lines with times/numbers must cite a claim; 2/3 of lines must cite claims;
+  `archive_entry` is set deterministically to "RECONSTRUCTION - <case> (<year>)"; a story whose
+  fact-check could not run is marked `draft_with_problems`; unhedged theory lines get a hedge
+  appended as a last resort. Fiction: a rewrite may not add failed checks (round 6's rewrite dropped
+  5 scenes to 3); film devices have no on-screen overlay.
+- **More free providers (research 2026-10-18; V = read on an official page that day, U = not):**
+  added Mistral free mode (`mistral-large-4-0`, `mistral-medium-3-5`, `mistral-small-latest`, ids V;
+  limits only in the console; prompts may be used for training, opt-out available, V; commercial use
+  on free mode U), Cloudflare Workers AI (10,000 Neurons/day shared by all models, V; OpenAI-compatible
+  endpoint with the account id in the URL, V), Z.ai GLM flash models (free per the pricing page, V;
+  ids `glm-4.7-flash`/`glm-4.5-flash` U), and Gemma 4 on the Gemini key (`gemma-4-31b-it`,
+  `gemma-4-26b-a4b-it`, free of charge, V; JSON mode U, so the provider falls back to prompt-only
+  JSON). NVIDIA NIM is configured but kept out of the chain: its free API access is a "trial service
+  ... for prototyping" (V). Excluded: SambaNova (free plan now requires buying credits, V), Cohere
+  (trial keys are for testing/proofs of concept, V), Hugging Face Inference Providers (no monthly
+  credits for free users any more, V), Alibaba Model Studio and SiliconFlow (one-time credits, V).
+  Not checked (documentation sites unreachable from the authoring sandbox): OVHcloud, Together,
+  Fireworks, Hyperbolic, Nebius, Chutes, Vercel AI Gateway, Ollama Cloud, ModelScope.

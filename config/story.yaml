@@ -1,19 +1,30 @@
 # Story engine (Milestone 2). Everything creative that should be tunable without code changes.
 
 llm:
-  # Providers are tried in this order. Any provider without its API key in .env is skipped, so with
-  # no keys everything runs on the local Ollama model. If one fails mid-story (free quota, outage),
-  # the next takes over. `--provider NAME` forces a single provider. Hosted free tiers are much
-  # faster than the laptop (~4 tok/s); their limits and data-use terms are the providers' own.
-  # When two or more hosted providers are available, the critique uses a different model than the
-  # writer (models grade their own work too kindly).
-  # openrouter's free models were rate-limited upstream on every call during testing, so it sits
-  # after gemini/groq as a backup and extra critic. groq_qwen spreads load (Groq limits are per model).
-  chain: [gemini, groq, groq_qwen, openrouter, cerebras, ollama]
+  # Order of use (hosted models first, the slow local model last):
+  #   1. every provider's BEST models: provider by provider in `chain` order, and within a provider
+  #      its models top to bottom. When a model hits its free-tier limit the next model of the SAME
+  #      provider is used; only when all of them are limited does it move on to the next provider.
+  #   2. then the same for the NORMAL models (`tier: normal`): smaller/faster, still hosted.
+  #   3. the local Ollama model.
+  # Free limits are per model (Gemini, Groq), so rotating multiplies the free capacity. A used-up
+  # daily quota skips that model for the rest of the run. When every hosted model is limited at
+  # once, a call waits up to max_wait_s for the first one to free up instead of using the local model.
+  # Providers without an API key in .env are skipped. `--provider NAME` forces one provider (still
+  # rotating its models). The critique uses a different model than the writer, preferably from
+  # another provider (models grade their own work kindly).
+  # Model names change: `uv run unseen llm-models --provider NAME` lists what your key can use and
+  # which configured models will be tried. In `models`, * stands for a version number, newest first
+  # (gemini-*-flash -> gemini-3.8-flash, gemini-3.7-flash, ...).
+  chain: [gemini, mistral, groq, cerebras, openrouter, cloudflare, zai, ollama]
+  max_wait_s: 300
+  cooldown_s: 60
   ollama:
     url: http://127.0.0.1:11434
-    # Google's official QAT 4-bit build, Apache-2.0, ~7 GB. Pulled by `unseen llm-setup`.
-    model: hf.co/google/gemma-4-12B-it-qat-q4_0-gguf
+    # Google's official QAT 4-bit build of the small Gemma 4 (E4B: 4.5B effective parameters),
+    # Apache-2.0, ~5 GB. Only used when no hosted model answers, so speed matters more than polish.
+    # Pulled by `unseen llm-setup`. (Bigger option: hf.co/google/gemma-4-12B-it-qat-q4_0-gguf, ~7 GB.)
+    model: hf.co/google/gemma-4-E4B-it-qat-q4_0-gguf
     # 8k is enough now that repairs/revisions are small targeted calls; a smaller context leaves
     # more of the 4 GB GPU for model layers (faster). Speed tip (optional, then restart Ollama):
     #   setx OLLAMA_FLASH_ATTENTION 1   and   setx OLLAMA_KV_CACHE_TYPE q8_0
@@ -24,36 +35,83 @@ llm:
     timeout_s: 2400 # CPU generation of a full script can take several minutes
   gemini: # key: https://aistudio.google.com/apikey -> GEMINI_API_KEY
     url: https://generativelanguage.googleapis.com/v1beta
-    # auto = newest stable gemini-X.Y-flash model your free key can use (falls back to older ones),
-    # so a retired model never breaks the daily run. Or pin one, e.g. gemini-2.5-flash.
-    # auto-pro = try the newest gemini-X.Y-pro first (better writing; free quota may be small or
-    # absent), then fall back to flash models.
-    model: auto # list: uv run unseen llm-models --provider gemini
+    # Stable models only (no -preview/-image variants), best first: pro, then flash; the normal tier
+    # adds Gemma 4 (free of charge on the same key, own quota) and flash-lite. A model without a free
+    # tier for your key answers "limit 0" once and is skipped.
+    models:
+      - "gemini-*-pro"
+      - "gemini-*-flash"
+      - { id: gemma-4-31b-it, tier: normal }
+      - { id: "gemini-*-flash-lite", tier: normal }
+      - { id: gemma-4-26b-a4b-it, tier: normal }
     timeout_s: 300
-    # Gemini 2.5 "thinks" before answering and those tokens count against the output limit;
-    # unbounded thinking truncated long real-mystery scripts. 0 disables thinking.
+    # Gemini "thinks" before answering and those tokens count against the output limit;
+    # unbounded thinking truncated long real-mystery scripts. 0 disables thinking (flash only).
     thinking_budget: 1024
     max_output_tokens: 16384
-  openai_compat: # OpenAI-compatible APIs; model names change, check with llm-models
-    groq: # key: https://console.groq.com/keys -> GROQ_API_KEY
+  openai_compat: # OpenAI-compatible APIs
+    mistral: # key: https://console.mistral.ai -> API Keys (free "Experiment" mode, no card) -> MISTRAL_API_KEY
+      # Free mode: limits are shown in the console (Admin > API > Limits); prompts may be used for
+      # training unless you opt out in the console. Story prompts are fiction/public facts only.
+      url: https://api.mistral.ai/v1
+      key_env: MISTRAL_API_KEY
+      extra_body: { reasoning_effort: none } # no hidden reasoning eating the output budget
+      models:
+        - mistral-large-4-0
+        - mistral-medium-3-5
+        - { id: mistral-small-latest, tier: normal }
+    groq: # key: https://console.groq.com/keys -> GROQ_API_KEY (limits are per model)
       url: https://api.groq.com/openai/v1
-      model: openai/gpt-oss-120b # largest model on the key (also: openai/gpt-oss-20b, qwen/qwen3.8-27b)
       key_env: GROQ_API_KEY
-      # gpt-oss is a reasoning model: hidden reasoning counts against max_tokens and cut scripts off
-      extra_body: { reasoning_effort: low }
-    groq_qwen: # same GROQ_API_KEY, separate per-model rate limits
-      url: https://api.groq.com/openai/v1
-      model: qwen/qwen3.8-27b
-      key_env: GROQ_API_KEY
+      models:
+        # gpt-oss is a reasoning model: hidden reasoning counts against max_tokens and cut scripts off
+        - { id: openai/gpt-oss-120b, extra_body: { reasoning_effort: low } }
+        - { id: qwen/qwen3.8-27b, tier: normal }
+        - { id: openai/gpt-oss-20b, tier: normal, extra_body: { reasoning_effort: low } }
+    openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY
+      # ":free" models: an account-wide daily cap on all free models plus frequent upstream limits
+      # per model, so several are listed.
+      url: https://openrouter.ai/api/v1
+      key_env: OPENROUTER_API_KEY
+      models:
+        - { id: "nvidia/nemotron-3-ultra-550b-a55b:free", extra_body: { reasoning: { effort: low } } }
+        - "google/gemma-4-31b-it:free"
+        - { id: "nvidia/nemotron-3-super-120b-a12b:free", tier: normal, extra_body: { reasoning: { effort: low } } }
+        - { id: "thinkingmachines/inkling:free", tier: normal }
+        - { id: "google/gemma-4-26b-a4b-it:free", tier: normal }
     cerebras: # key: https://cloud.cerebras.ai -> CEREBRAS_API_KEY
       url: https://api.cerebras.ai/v1
-      model: gpt-oss-120b
       key_env: CEREBRAS_API_KEY
-      extra_body: { reasoning_effort: low }
-    openrouter: # key: https://openrouter.ai/keys -> OPENROUTER_API_KEY; ":free" models are rate-capped
-      url: https://openrouter.ai/api/v1
-      model: "google/gemma-4-31b-it:free" # free; alternatives: nvidia/nemotron-3-ultra-550b-a55b:free, thinkingmachines/inkling:free
-      key_env: OPENROUTER_API_KEY
+      models:
+        - { id: gpt-oss-120b, extra_body: { reasoning_effort: low } }
+    cloudflare: # Workers AI: dash.cloudflare.com -> AI -> Workers AI -> REST API token -> CLOUDFLARE_API_TOKEN
+      # + CLOUDFLARE_ACCOUNT_ID. Free: 10,000 "Neurons" per day shared by all models (roughly 10-80
+      # script-sized calls depending on the model).
+      url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+      key_env: CLOUDFLARE_API_TOKEN
+      models:
+        - "@cf/moonshotai/kimi-k2.5"
+        - "@cf/openai/gpt-oss-120b"
+        - { id: "@cf/nvidia/nemotron-3-120b-a12b", tier: normal }
+        - { id: "@cf/qwen/qwen3.8-27b", tier: normal }
+        - { id: "@cf/google/gemma-4-26b-a4b-it", tier: normal }
+    zai: # Z.ai (GLM): https://z.ai -> API Keys -> ZAI_API_KEY. The Flash models are listed as free.
+      # Model ids taken from the pricing page names; `llm-models --provider zai` confirms them.
+      url: https://api.z.ai/api/paas/v4
+      key_env: ZAI_API_KEY
+      extra_body: { thinking: { type: disabled } }
+      models:
+        - { id: glm-4.7-flash, tier: normal }
+        - { id: glm-4.5-flash, tier: normal }
+    nvidia: # NOT in the chain: NVIDIA's free API access is a trial "for prototyping", not for a
+      # production channel. Add `nvidia` to llm.chain only for testing. Key: build.nvidia.com -> NVIDIA_API_KEY
+      url: https://integrate.api.nvidia.com/v1
+      key_env: NVIDIA_API_KEY
+      models:
+        - { id: z-ai/glm-5.3, extra_body: { reasoning_effort: low } }
+        - deepseek-ai/deepseek-v4.1-flash
+        - { id: nvidia/nemotron-3-super-120b-a12b, tier: normal,
+            extra_body: { chat_template_kwargs: { enable_thinking: false } } }
   temperature:
     concepts: 1.0
     script: 0.8

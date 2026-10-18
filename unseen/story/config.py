@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, BeforeValidator
 
 from ..config import CONFIG_DIR, load_yaml
 
@@ -15,9 +17,24 @@ class OllamaCfg(BaseModel):
     think: bool | str = False
 
 
+class ModelEntry(BaseModel):
+    id: str                 # exact model name, or a pattern where * = a version number (newest first)
+    tier: Literal["best", "normal"] = "best"   # every provider's best models are used before any normal one
+    extra_body: dict = {}   # merged into this model's requests, e.g. {"reasoning_effort": "low"}
+
+
+def _model_list(value):
+    """`models:` accepts plain names and {id, extra_body} mappings, or a single name."""
+    items = [value] if isinstance(value, (str, dict)) else list(value or [])
+    return [{"id": x} if isinstance(x, str) else x for x in items]
+
+
+Models = Annotated[list[ModelEntry], BeforeValidator(_model_list)]
+
+
 class GeminiCfg(BaseModel):
     url: str
-    model: str
+    models: Models
     timeout_s: float = 300
     thinking_budget: int | None = 1024
     max_output_tokens: int = 16384
@@ -31,14 +48,16 @@ class Temperatures(BaseModel):
 
 class OpenAICompatCfg(BaseModel):
     url: str
-    model: str
+    models: Models
     key_env: str
     timeout_s: float = 300
-    extra_body: dict = {}   # merged into each request, e.g. {"reasoning_effort": "low"}
+    extra_body: dict = {}   # merged into every model's requests
 
 
 class LLMCfg(BaseModel):
     chain: list[str] = ["ollama"]   # the real order lives in config/story.yaml (llm.chain)
+    max_wait_s: float = 300         # all hosted models rate-limited: wait this long per call before the local model
+    cooldown_s: float = 60          # rate-limited model without a retry time: rest 60 s, then 120 s, 240 s, ...
     ollama: OllamaCfg
     gemini: GeminiCfg
     openai_compat: dict[str, OpenAICompatCfg] = {}

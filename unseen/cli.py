@@ -212,8 +212,12 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
             provider = make_provider(cfg.llm, name)
         except LLMError as exc:
             print(f"  skipped: {exc}")
-            results.append(f"{name:10} skipped (no key)")
+            results.append(f"{name:10} skipped ({str(exc)[:80]})")
             continue
+        slots = getattr(provider, "providers", [provider])
+        tiers = {0: "best", 1: "normal"}
+        print("  models, in the order they are tried: "
+              + ", ".join(f"{p.model} ({tiers.get(getattr(p, 'tier', 0), '?')})" for p in slots))
         try:
             if provider.name == "ollama":
                 print(f"  Ollama {provider.version()} at {provider.url}")
@@ -227,7 +231,7 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
                                      user="Write a 4-line micro-story: the last log entry of a lighthouse keeper.")
             print(f"  {obj.title}\n    " + "\n    ".join(obj.lines))
             results.append(f"{name:10} {provider.model}: {stats.output_tokens} tokens in {stats.seconds} s "
-                           f"({stats.tokens_per_s} tok/s incl. latency)")
+                           f"({stats.tokens_per_s} tok/s incl. latency); {len(slots)} model(s) in rotation")
         except LLMError as exc:
             print(f"  FAILED: {exc}")
             results.append(f"{name:10} FAILED: {str(exc)[:120]}")
@@ -235,21 +239,29 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
             unload = getattr(provider, "unload", None)
             if unload:
                 unload()
-    print("\nSummary (story new uses the first working provider in this order):\n  " + "\n  ".join(results))
+    print("\nSummary (story new uses the best models of every provider first, then the normal ones, then "
+          "the local model):\n  " + "\n  ".join(results))
     return 0
 
 
 def cmd_llm_models(args: argparse.Namespace) -> int:
+    from .llm.base import LLMError
     from .story.config import load_story_config
-    from .story.engine import make_provider
-    provider = make_provider(load_story_config().llm, args.provider)
+    from .story.engine import build_provider, provider_models
+    cfg = load_story_config().llm
+    provider = build_provider(cfg, args.provider)
     lister = getattr(provider, "list_models", None)
     if lister is None:
         print(f"{args.provider} has no model listing; for Ollama use `ollama list`.")
         return 1
     models = lister()
     print(f"{len(models)} models available to your {args.provider} key:\n  " + "\n  ".join(models))
-    print(f"\nConfigured: {provider.model}  (change it in config/story.yaml)")
+    try:
+        used = [f"{p.model} ({'best' if p.tier == 0 else 'normal'})" for p in provider_models(cfg, args.provider)]
+        print("\nUsed by the story engine, in this order:\n  " + "\n  ".join(used))
+    except LLMError as exc:
+        print(f"\n{exc}")
+    print("(change the list in config/story.yaml)")
     return 0
 
 

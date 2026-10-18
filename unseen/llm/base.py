@@ -24,11 +24,27 @@ class LLMError(RuntimeError):
 
 
 class TransientLLMError(LLMError):
-    """Rate limit, overload or timeout: worth retrying the same provider a bit later."""
+    """Rate limit, overload or timeout: worth retrying the same model a bit later.
 
-    def __init__(self, message: str, retry_after: float | None = None):
+    daily: the model's daily quota is used up (skip it for the rest of the run).
+    family: the limit covers every model of the provider (e.g. OpenRouter's account-wide free cap).
+    """
+
+    def __init__(self, message: str, retry_after: float | None = None, daily: bool = False,
+                 family: bool = False):
         super().__init__(message)
         self.retry_after = retry_after
+        self.daily = daily
+        self.family = family
+
+
+class ProviderLLMError(LLMError):
+    """The whole provider is unusable this run (key rejected, service not running): skip all its models."""
+
+
+class SkipCallLLMError(LLMError):
+    """This model can't answer this particular request (larger than its per-minute token cap, blocked
+    by a safety filter): skip the model for this call only; other calls can still use it."""
 
 
 def retry_after_seconds(headers) -> float | None:
@@ -36,6 +52,33 @@ def retry_after_seconds(headers) -> float | None:
         return float(headers.get("retry-after")) if headers.get("retry-after") else None
     except (TypeError, ValueError):
         return None
+
+
+TRY_AGAIN = re.compile(r"try again in (?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)(ms|s))?", re.IGNORECASE)
+
+
+def try_again_seconds(text: str) -> float | None:
+    """'Please try again in 1m2.5s' (Groq) -> 62.5."""
+    m = TRY_AGAIN.search(text)
+    if not m or not any(m.groups()):
+        return None
+    h, mins, secs, unit = m.groups()
+    total = int(h or 0) * 3600 + int(mins or 0) * 60
+    if secs:
+        total += float(secs) / (1000 if unit == "ms" else 1)
+    return float(total)
+
+
+def expand_model_pattern(pattern: str, available: list[str]) -> list[str]:
+    """'gemini-*-flash' -> matching model names, newest version first ('*' = a version number)."""
+    rx = re.compile(re.escape(pattern).replace(r"\*", r"(\d+(?:\.\d+)*)"))
+    found = []
+    for name in available:
+        m = rx.fullmatch(name)
+        if m:
+            version = tuple(int(x) for g in m.groups() for x in g.split("."))
+            found.append((version, name))
+    return [n for _, n in sorted(found, reverse=True)]
 
 
 class Provider(Protocol):

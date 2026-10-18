@@ -7,6 +7,7 @@ import json
 
 from .config import StoryConfig, Topic
 from .models import Claim, Concept, Critique, StoryDraft
+from .validate import expected_scenes as scene_count
 
 CATEGORY_BRIEF = {
     "fiction_horror": "an original fictional horror story presented as a recovered recording",
@@ -17,9 +18,19 @@ CATEGORY_BRIEF = {
                      "to the provided claims"),
 }
 
+ENDING_RULE = {
+    "fiction": ("- The first scene shows something wrong within the first second; the last line points the viewer at a\n"
+                "  detail they missed, so they rewatch (e.g. \"Watch the mirror, not the bed.\")."),
+    "real_mystery": ("- The first scene shows the most arresting documented sight within the first second; the last line\n"
+                     "  lands on what remains unexplained, stated plainly. Times, numbers and names only as they\n"
+                     "  appear in the claims. Never invent a clue, sign, symbol, reading, log or event to make the\n"
+                     "  case more dramatic: the documented facts are the story."),
+}
 
-def system_prompt(cfg: StoryConfig) -> str:
+
+def system_prompt(cfg: StoryConfig, category: str | None = None) -> str:
     b, r = cfg.brand, cfg.rules
+    ending = ENDING_RULE["real_mystery" if category == "real_mystery" else "fiction"]
     return f"""You are the head writer of "{b.name}" ("{b.tagline}"), an Instagram Reels channel of short,
 unsettling stories presented as fragments of a mysterious archive: recovered camcorder tapes,
 security footage, night-vision recordings and other evidence that was never meant to be seen.
@@ -34,8 +45,7 @@ Craft rules:
 - Believable and documentary-like, never Hollywood. Ordinary places, ordinary people, one wrong detail.
 - The Archivist states facts: times, counts, objects, names of places. Never adjectives that tell the
   viewer how to feel (eerie, mysterious, chilling, sinister...). Short sentences. Precise numbers.
-- The first scene shows something wrong within the first second; the last line points the viewer at a
-  detail they missed, so they rewatch (e.g. "Watch the mirror, not the bed.").
+{ending}
 
 Voice examples (style only; never reuse their content):
 - "Tape four. The family checked out at 9:14. The camera kept recording the empty room. At 9:31 the
@@ -62,17 +72,21 @@ def concepts_prompt(cfg: StoryConfig, category: str, target_seconds: int, ingred
     if recent_titles:
         parts.append("Recent stories on the channel (do NOT repeat their premise, setting or twist):\n"
                      + "\n".join(f"- {t}" for t in recent_titles))
+    if category == "real_mystery":
+        parts.append("Make the 5 concepts 5 different ANGLES on this one documented case: which documented moment "
+                     "or sight opens it and what it builds to. Never a new event, an invented investigation or an "
+                     "invented clue. The premise is what was documented; a theory may appear only as a hedged "
+                     "possibility near the end, never as the premise or the title. The title names the case, the "
+                     "place or a documented detail. visual_hook = a documented sight from the claims, shown in the "
+                     "first second; rewatch_clue = a documented visual detail from the claims (never an invented "
+                     "sign, symbol, reading, log, timestamp or object). Keep it understandable on one watch.")
+        return "\n\n".join(parts)
     parts.append("Make the 5 concepts genuinely different from each other in premise, device and ending. "
                  "Each anomaly must be something a camera can SHOW, not only something heard or felt. Keep each "
                  "concept SIMPLE: one place, one anomaly, one reveal, understandable on the first watch (a "
                  "30-second Reel cannot carry several mysteries). visual_hook = what we see in the very first "
                  "second; rewatch_clue = a visible detail planted early that the ending makes the viewer look for.")
     return "\n\n".join(parts)
-
-
-def scene_count(cfg: StoryConfig, target_seconds: int) -> int:
-    ln = cfg.length
-    return max(3, min(ln.max_scenes, round(target_seconds / ln.scene_seconds.typical)))
 
 
 def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept: Concept,
@@ -82,12 +96,18 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
     n_scenes = scene_count(cfg, target_seconds)
     per_scene = int(ln.scene_seconds.max * ln.words_per_second)
     device_lines = "\n".join(f"- {k}: {v}" for k, v in devices.items())
+    if category == "real_mystery":
+        shape = (f"Scene 1 must SHOW the visual hook ({concept.visual_hook}) within its first second. The documented "
+                 f"detail ({concept.rewatch_clue}) is visible in an early scene. End on what remains unexplained, "
+                 f"stated plainly. Nothing in the narration or the footage may suggest evidence the claims don't contain.")
+    else:
+        shape = (f"Scene 1 must SHOW the visual hook ({concept.visual_hook}) within its first second. Plant the rewatch "
+                 f"clue ({concept.rewatch_clue}) visibly in an early scene; the final narration line points the viewer "
+                 f"back to it. One place, one anomaly, one reveal: cut anything that needs explaining.")
     parts = [
         f"Write the full Reel script for this concept ({CATEGORY_BRIEF[category]}):\n"
         f"{concept.model_dump_json(indent=2)}",
-        f"Scene 1 must SHOW the visual hook ({concept.visual_hook}) within its first second. Plant the rewatch "
-        f"clue ({concept.rewatch_clue}) visibly in an early scene; the final narration line points the viewer "
-        f"back to it. One place, one anomaly, one reveal: cut anything that needs explaining.",
+        shape,
         f"Timing: write EXACTLY {n_scenes} scenes (about {target_seconds} s in total); each scene is ONE "
         f"generated video clip of {ln.scene_seconds.min:g}-{ln.scene_seconds.max:g} s (usually "
         f"{ln.scene_seconds.typical:g} s). Narration totals about {words_target} spoken words, delivered slowly "
@@ -108,7 +128,8 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
         "on-screen overlay are added in post-production). Never describe sound.",
         "sfx: 1-3 cues per scene placed where the action happens (a door opening, footsteps, a hum that "
         "stops). Use 'silence' right before the biggest reveal.",
-        "osd: realistic camera overlay text for the device (timestamps, CAM numbers, REC) matching the era.",
+        "osd: realistic camera overlay label for the device (CAM numbers, REC; dates/times are added later). "
+        "Film (film_8mm, film_16mm) has no overlay: leave osd empty.",
         "Visual storytelling (the footage must carry the story on its own, even muted):\n"
         "- No two consecutive scenes may repeat the same framing and action; use at least 4 distinct setups "
         "(e.g. wide establishing, detail, reveal, aftermath) across the Reel.\n"
@@ -135,9 +156,11 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
                      "place (recorded_year = this year, modern devices) narrated over what remains today. "
                      "Pick one and keep every scene consistent with it. Visual details of real places and "
                      "objects must match the claims marked [visual]; never invent their appearance.")
-        parts.append("Real case rules: every factual narration line lists the claim_ids it relies on. "
+        parts.append("Real case rules: every factual narration line lists the claim_ids it relies on (at least two "
+                     "thirds of the lines cite claims; the rest are short scene-setting with no facts in them). "
                      "Claims tagged disputed/theory/legend must be hedged in the line (reportedly, some believe, "
-                     "according to...). Never add facts that are not in the claims. Refer to private people by "
+                     "according to...). Never add facts that are not in the claims: no invented times, dates, counts, "
+                     "measurements, readings, logs, vehicles, witnesses, signs or objects. Refer to private people by "
                      "their role (the photographer, his daughter, a crew member), not by name, unless they are "
                      "long-dead historical figures; never speculate about anyone's guilt or character. Visuals are "
                      "a dramatized reconstruction.\nClaims:\n" + _claims_block(claims or []))
@@ -226,8 +249,11 @@ def fact_check_prompt(draft: StoryDraft, claims: list[Claim]) -> str:
     return ("You are a strict fact-checker for a dramatized documentary Reel. For every narration line, judge "
             "whether it says ONLY what its cited claims (and their source quotes) support. Hedged wording of "
             "theories/legends is fine; adding specifics, picking one side of an open question, or contradicting "
-            "a claim is not. Lines with no factual assertion are 'atmospheric'. For unsupported or contradicted "
-            "lines, write a corrected line that keeps the tone but states only what the claims support.\n\n"
+            "a claim is not. A line that cites nothing but states specifics (a time, count, log, reading, "
+            "measurement, sign, object or event) is 'unsupported', and so is a line pointing the viewer at a clue "
+            "the claims don't mention. Lines with no factual assertion are 'atmospheric'. For unsupported or "
+            "contradicted lines, write a corrected line that keeps the tone but states only what the claims "
+            "support.\n\n"
             f"CLAIMS:\n{sourced}\n\nNARRATION:\n{lines}")
 
 

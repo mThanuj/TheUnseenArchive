@@ -194,10 +194,41 @@ def test_osd_dates_are_stripped_and_scene_issues_found(cfg):
     d.scenes[0].osd = "CAM 01  10-17-2026  20:03:12"
     d.scenes[1].osd = "03:14:12 PM  REC"
     d.scenes[2].osd = "REEL 04 - 1974"
+    d.scenes[3].device = "film_16mm"
+    d.scenes[3].osd = "REC"
     clean_osd(d)
-    assert [s.osd for s in d.scenes[:3]] == ["CAM 01", "REC", "REEL 04"]
+    assert [s.osd for s in d.scenes[:4]] == ["CAM 01", "REC", "REEL 04", ""]    # film has no overlay
     issues = scene_issues(d, cfg, "fiction_horror", None)
-    assert set(issues) == {s.id for s in d.scenes}          # camcorder (1983+) in 1977 everywhere
+    assert set(issues) == {s.id for s in d.scenes if s.device == "camcorder"}   # camcorder (1983+) in 1977
     fixes = SceneFixes.model_validate({"scenes": [{"id": 1, "device": "16mm", "video_prompt": "A new prompt."}]})
     assert apply_scene_fixes(d, fixes, {1}) == ["scene 1 rewritten"]
     assert d.scenes[0].device == "film_16mm" and d.scenes[0].video_prompt == "A new prompt."
+
+
+def test_too_few_scenes_and_uncited_specifics_are_flagged(cfg):
+    d = draft_dict()
+    d["scenes"] = d["scenes"][:3]
+    probs = validate_story(StoryDraft.model_validate(d), cfg, 20, "fiction_horror")
+    assert any("only 3 scenes; a 20 s Reel needs 5" in p for p in probs)
+    claims = [Claim(id=1, text="Lights were seen.", quote="lights were seen", tag="fact")]
+    d = draft_dict()
+    for n in d["narration"]:
+        n["claim_ids"] = [1]
+    d["narration"][1]["text"] = "The dashcam logged it at 14:03."      # invented time, no claim behind it
+    d["narration"][1]["claim_ids"] = []
+    probs = validate_story(StoryDraft.model_validate(d), cfg, 30, "real_mystery", claims)
+    assert any("line 2 states a specific detail without citing a claim" in p for p in probs)
+    d["narration"][1]["text"] = "No one came back for it."             # atmospheric: fine uncited
+    assert validate_story(StoryDraft.model_validate(d), cfg, 30, "real_mystery", claims) == []
+
+
+def test_unhedged_theory_lines_get_a_hedge_as_last_resort(cfg):
+    from unseen.story.repair import hedge_lines
+    claims = [Claim(id=1, text="Dust may burn.", quote="dust burning", tag="theory"),
+              Claim(id=2, text="Seen since 1981.", quote="since 1981", tag="fact")]
+    d = draft()
+    d.narration[0].text, d.narration[0].claim_ids = "Dust analysis shows titanium.", [1]
+    d.narration[1].text, d.narration[1].claim_ids = "Some believe the dust burns.", [1]
+    d.narration[2].claim_ids = [2]
+    assert hedge_lines(d, cfg, claims) == ["line 1 -> Dust analysis shows titanium, according to one theory."]
+    assert d.narration[1].text == "Some believe the dust burns."        # already hedged: untouched
