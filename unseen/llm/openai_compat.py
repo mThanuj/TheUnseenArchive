@@ -30,14 +30,29 @@ def expand_env(name: str, url: str) -> str:
 
 
 def error_text(r) -> str:
-    """The API's own error message (OpenRouter puts the upstream reason in metadata.raw)."""
+    """The API's own error message, whatever its shape: OpenAI-style {"error": {"message"}} (OpenRouter
+    adds the upstream reason in metadata.raw), Cloudflare {"errors": [{"code", "message"}]}, or
+    {"message"/"detail": ...} (Mistral)."""
     try:
-        err = r.json().get("error") or {}
+        body = r.json()
     except (ValueError, AttributeError):
         return r.text[:300]
-    raw = (err.get("metadata") or {}).get("raw") if isinstance(err, dict) else None
-    msg = err.get("message", "") if isinstance(err, dict) else str(err)
-    return f"{msg} {raw}".strip() if raw else (msg or r.text[:300])
+    if not isinstance(body, dict):
+        return r.text[:300]
+    err = body.get("error")
+    if isinstance(err, dict):
+        raw = (err.get("metadata") or {}).get("raw")
+        msg = err.get("message", "")
+        return f"{msg} {raw}".strip() if raw else (msg or r.text[:300])
+    if err:
+        return str(err)
+    if isinstance(body.get("errors"), list) and body["errors"]:
+        return "; ".join(f"{e.get('code', '')} {e.get('message', '')}".strip() if isinstance(e, dict) else str(e)
+                         for e in body["errors"])
+    return str(body.get("message") or body.get("detail") or r.text[:300])
+
+
+KEY_PROBLEM = re.compile(r"api[ _-]?key|token|authenticat|unauthori[sz]ed|credential", re.IGNORECASE)
 
 
 def limit_error(name: str, model: str, r) -> LLMError:
@@ -107,8 +122,10 @@ class OpenAICompatProvider:
             raise TransientLLMError(f"{self.name}:{self.model}: temporarily unavailable ({r.status_code})")
         if r.status_code == 403 and re.search(r"flagged|moderation", r.text, re.IGNORECASE):
             raise SkipCallLLMError(f"{self.name}:{self.model}: request refused by moderation")
-        if r.status_code in (401, 403):
-            raise ProviderLLMError(f"{self.name}: API key rejected ({r.status_code})")
+        if r.status_code == 401 or (r.status_code == 403 and KEY_PROBLEM.search(error_text(r))):
+            raise ProviderLLMError(f"{self.name}: API key rejected ({r.status_code}: {error_text(r)[:200]})")
+        if r.status_code == 403:   # e.g. a model that isn't on the free plan: the provider's other models may work
+            raise LLMError(f"{self.name}:{self.model}: access denied (403: {error_text(r)[:200]})")
         if r.status_code == 404:
             raise LLMError(f"{self.name}: model '{self.model}' not found; run `uv run unseen llm-models "
                            f"--provider {self.name}` and set it in config/story.yaml")

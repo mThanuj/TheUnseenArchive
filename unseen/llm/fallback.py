@@ -28,6 +28,11 @@ Log = Callable[[str], None]
 INF = float("inf")
 
 
+def brief(exc: Exception, n: int = 160) -> str:
+    """One line (API error bodies are often pretty-printed JSON), at most n characters."""
+    return " ".join(str(exc).split())[:n]
+
+
 class FallbackProvider:
     def __init__(self, providers: list, log: Log = print, cooldown_s: float = 60.0, max_wait_s: float = 300.0,
                  slow: tuple[str, ...] = ("ollama",), short_retry_s: float = 10.0, max_cooldown_s: float = 900.0,
@@ -90,6 +95,11 @@ class FallbackProvider:
         ordered = sorted(fast, key=lambda p: (getattr(p, "tier", 0), p.name == writer.name))   # stable
         return self._view(ordered) if ordered else None
 
+    def minor_view(self) -> "FallbackProvider":
+        """Same slots with the normal tier first: for small fix-up calls, keeping the best models'
+        daily quota for the calls that shape the story."""
+        return self._view(sorted(self.providers, key=lambda p: -getattr(p, "tier", 0)))   # stable
+
     # ------------------------------------------------------------------ state
     def _until(self, p) -> float:
         return max(self._cool.get(self.key(p), (0.0, 0))[0], self._cool.get(p.name, (0.0, 0))[0])
@@ -106,7 +116,7 @@ class FallbackProvider:
     def _limited(self, p, exc: TransientLLMError) -> None:
         key = p.name if exc.family else self.key(p)
         what = f"every {p.name} model" if exc.family else key
-        detail = str(exc)[:160]
+        detail = brief(exc)
         if exc.daily:
             self._cool_down(key, INF)
             self._log(f"  {what}: daily free quota used up ({detail}); skipped for the rest of this run")
@@ -123,11 +133,11 @@ class FallbackProvider:
                 out = p.complete_json(*args)
             except SkipCallLLMError as exc:
                 skip.add(key)
-                errors[key] = str(exc)
-                self._log(f"  {key} can't take this request ({str(exc)[:160]}); skipping it for this step")
+                errors[key] = brief(exc, 300)
+                self._log(f"  {key} can't take this request ({brief(exc)}); skipping it for this step")
                 return None
             except TransientLLMError as exc:
-                errors[key] = str(exc)
+                errors[key] = brief(exc, 300)
                 soon = exc.retry_after is not None and exc.retry_after <= self.short_retry_s
                 if attempt == 0 and soon and not exc.daily:
                     self._log(f"  {key} busy; retrying in {max(exc.retry_after, 1.0):.0f} s")
@@ -136,13 +146,13 @@ class FallbackProvider:
                 self._limited(p, exc)
                 return None
             except LLMError as exc:
-                errors[key] = str(exc)
+                errors[key] = brief(exc, 300)
                 if isinstance(exc, ProviderLLMError):
                     self._cool_down(p.name, INF)
-                    self._log(f"  {p.name} disabled for this run ({str(exc)[:160]})")
+                    self._log(f"  {p.name} disabled for this run ({brief(exc)})")
                 else:
                     self._cool_down(key, INF)
-                    self._log(f"  {key} disabled for this run ({str(exc)[:160]})")
+                    self._log(f"  {key} disabled for this run ({brief(exc)})")
                 return None
             self._cool.pop(key, None)
             self._cool.pop(p.name, None)

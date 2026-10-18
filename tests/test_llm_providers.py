@@ -96,6 +96,12 @@ def test_rate_limit_errors_are_classified(monkeypatch, no_keys):
     upstream = _raised(monkeypatch, p, Resp(200, {"error": {"code": 429, "message": "Provider returned error",
                                                             "metadata": {"raw": "x:free is rate-limited upstream"}}}))
     assert isinstance(upstream, TransientLLMError) and not upstream.family and "upstream" in str(upstream)
+    # 403: a bad key/token disables the provider; anything else only this model (with the API's reason)
+    cf = _raised(monkeypatch, p, Resp(403, {"success": False, "errors": [{"code": 10000,
+                                                                          "message": "Authentication error"}]}))
+    assert isinstance(cf, ProviderLLMError) and "10000 Authentication error" in str(cf)
+    plan = _raised(monkeypatch, p, Resp(403, {"message": "Model not available on your current plan"}))
+    assert type(plan) is LLMError and "not available on your current plan" in str(plan)
 
 
 def test_gemini_quota_errors_say_which_limit(monkeypatch, no_keys):
@@ -380,6 +386,23 @@ def test_critic_prefers_other_providers_within_each_tier():
     view = fb.critic_view()
     assert [FallbackProvider.key(p) for p in view.providers] == [
         "groq:oss-120b", "gemini:flash", "groq:qwen", "gemini:lite"]
+    minor = fb.minor_view()                               # repairs: normal tier first, best quota saved
+    assert [FallbackProvider.key(p) for p in minor.providers] == [
+        "groq:qwen", "gemini:lite", "ollama:gemma", "gemini:pro", "gemini:flash", "groq:oss-120b"]
+    assert minor.complete_json("s", "u", {}, 0, 1)[0] == "from groq:qwen" and g1.calls == 1
+    assert minor._cool is fb._cool
+
+
+def test_gemini_per_model_settings_override_the_defaults(monkeypatch, no_keys):
+    from unseen.llm import gemini
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    sent = []
+    good = {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]}
+    monkeypatch.setattr(gemini.httpx, "post", lambda url, json=None, **k: sent.append(_copy(json)) or Resp(200, good))
+    p = gemini.GeminiProvider("https://g/v1beta", "gemma-4-31b-it", thinking_budget=1024,
+                              generation={"thinkingConfig": {"thinkingLevel": "minimal"}})
+    p.complete_json("s", "u", {}, 0.5, 100)
+    assert sent[0]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal"}
 
 
 def test_critic_view_shares_cooldowns():

@@ -44,7 +44,7 @@ class GeminiProvider:
     name = "gemini"
 
     def __init__(self, url: str, model: str, timeout_s: float = 300, thinking_budget: int | None = 1024,
-                 max_output_tokens: int = 16384):
+                 max_output_tokens: int = 16384, generation: dict | None = None):
         key = os.environ.get("GEMINI_API_KEY", "").strip()
         if not key or key.startswith("your-"):
             raise LLMError("Set GEMINI_API_KEY in .env to use the Gemini provider "
@@ -57,6 +57,8 @@ class GeminiProvider:
         self.thinking_budget = thinking_budget
         self.max_output_tokens = max_output_tokens
         self.json_mode = True   # responseMimeType JSON; switched off for models without it (Gemma)
+        # per-model generationConfig overrides from config (e.g. Gemma: {"thinkingConfig": {"thinkingLevel": "minimal"}})
+        self.generation = dict(generation or {})
         self.log = print
 
     def list_models(self) -> list[str]:
@@ -84,6 +86,7 @@ class GeminiProvider:
             config["responseMimeType"] = "application/json"
         if self.thinking_budget is not None:
             config["thinkingConfig"] = {"thinkingBudget": self.thinking_budget}
+        config.update(self.generation)
         body = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": f"{user}\n\nReturn one compact JSON object matching "
@@ -94,8 +97,9 @@ class GeminiProvider:
             r = self._post(self.model, body)
             low = r.text.lower() if r.status_code == 400 else ""
             if "thinking" in low and "thinkingConfig" in config:
-                config.pop("thinkingConfig")   # model without a thinking budget setting
+                config.pop("thinkingConfig")   # model without this thinking setting
                 self.thinking_budget = None
+                self.generation.pop("thinkingConfig", None)
                 continue
             if "json" in low and "responseMimeType" in config:
                 config.pop("responseMimeType")   # e.g. Gemma: no JSON mode; the prompt + validation suffice

@@ -41,9 +41,10 @@ llm:
     models:
       - "gemini-*-pro"
       - "gemini-*-flash"
-      - { id: gemma-4-31b-it, tier: normal }
+      # Gemma on the Gemini API thinks at length by default (35-135 s per small call in round 7)
+      - { id: gemma-4-31b-it, tier: normal, extra_body: { thinkingConfig: { thinkingLevel: minimal } } }
       - { id: "gemini-*-flash-lite", tier: normal }
-      - { id: gemma-4-26b-a4b-it, tier: normal }
+      - { id: gemma-4-26b-a4b-it, tier: normal, extra_body: { thinkingConfig: { thinkingLevel: minimal } } }
     timeout_s: 300
     # Gemini "thinks" before answering and those tokens count against the output limit;
     # unbounded thinking truncated long real-mystery scripts. 0 disables thinking (flash only).
@@ -220,7 +221,8 @@ rules:
   # Video models render text as gibberish (and hands writing as melting fingers): any of these, or a
   # quoted string, in a video prompt triggers a scene rewrite.
   video_prompt_text_risk: [written, writes, writing, handwritten, handwriting, reads, printout, printed,
-                           typed, label, labelled, labeled, headline, inscription, scrawled, spelled]
+                           typed, label, labelled, labeled, headline, inscription, scrawled, spelled,
+                           readout, nameplate, plaque, engraved, engraving, digits, numerals, digital display]
   banned_cliches:
     - it was all a dream
     - the narrator was dead all along
@@ -278,6 +280,8 @@ quality:
 real_mystery:
   min_years_ago_sensitive: 40 # cases where people died or vanished must be historical
   max_source_chars: 9000 # how much article text the model reads (CPU speed)
+  # Any of these marks a line as hedged. Theories/disputed claims need one in every line that uses
+  # them; a legend needs one once (the first line that tells it frames the rest).
   hedge_words:
     [
       reportedly,
@@ -300,4 +304,17 @@ real_mystery:
       supposedly,
       witnesses said,
       never confirmed,
+      chronicle,
+      chronicles,
+      chronicler,
+      chroniclers,
+      folklore,
+      tradition,
+      the story goes,
+      it is said,
+      suggests,
+      suggested,
+      proposed,
+      hypothesis,
+      believed,
     ]

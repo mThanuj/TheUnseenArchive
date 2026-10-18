@@ -28,15 +28,13 @@ $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() 
 # ----------------------------------------------------------------------------------------------
 # THIS ROUND (edited by Claude each round)
 # ----------------------------------------------------------------------------------------------
-$Round = 'M2 round 7: model rotation per provider (best tier first), waits instead of failing, honest real cases'
+$Round = 'M2 round 8: legends framed once, one look per real case, no clock times in shots, key diagnostics'
 $Steps = @(
     @{ Name = 'tests';          Cmd = 'uv run pytest -q -p no:cacheprovider' },
     # starts Ollama in the background if it is installed but not running (the last-resort model)
     @{ Name = 'ollama';         Cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\ensure_ollama.ps1' },
-    # shows every provider's model rotation; pulls the new small local model (~5 GB, once)
-    @{ Name = 'llm-setup';      Cmd = 'uv run unseen llm-setup' },
-    # downloads the latest finished Kaggle run (the story render that was queued) -> bench_results\compare.html
-    @{ Name = 'kaggle-fetch';   Cmd = 'uv run unseen kaggle-fetch' },
+    # both answered 403 last round: this prints the API's own reason (and tries every Mistral model)
+    @{ Name = 'llm-keys';       Cmd = 'uv run unseen llm-setup --provider mistral,cloudflare' },
     @{ Name = 'story-real';     Cmd = 'uv run unseen story new --category real_mystery' },
     @{ Name = 'story-fiction';  Cmd = 'uv run unseen story new' }
 )

@@ -198,7 +198,7 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
     from .story.config import load_story_config
     from .story.engine import make_provider
     cfg = load_story_config()
-    names = [args.provider] if args.provider else cfg.llm.chain
+    names = [n.strip() for n in args.provider.split(",") if n.strip()] if args.provider else cfg.llm.chain
     from .llm.base import LLMError
 
     class SpeedTest(BaseModel):
@@ -224,7 +224,7 @@ def cmd_llm_setup(args: argparse.Namespace) -> int:
                 if provider.has_model():
                     print(f"  model present: {provider.model}")
                 else:
-                    print(f"  pulling {provider.model} (~7 GB, one time) ...")
+                    print(f"  pulling {provider.model} (several GB, one time) ...")
                     provider.pull()
             obj, stats, _ = generate(provider, SpeedTest, name="speed-test", temperature=0.7, max_tokens=1000,
                                      max_retries=1, system="You write eerie, restrained micro-fiction. Answer in JSON.",
@@ -433,7 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ---- Milestone 2: stories
     p = sub.add_parser("llm-setup", help="check each LLM provider in the chain, pull the local model, measure speed")
-    p.add_argument("--provider", help="only this provider (ollama, gemini, groq, cerebras, openrouter, ...)")
+    p.add_argument("--provider", help="only these providers, comma-separated (e.g. mistral,cloudflare)")
     p.set_defaults(func=cmd_llm_setup)
 
     p = sub.add_parser("llm-models", help="list the models a hosted provider offers your API key")

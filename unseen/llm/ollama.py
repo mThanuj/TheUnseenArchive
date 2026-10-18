@@ -50,6 +50,7 @@ class OllamaProvider:
 
     def pull(self, log: Log = print) -> None:
         last: dict[str, float] = {}   # per layer digest
+        last_status = ""
         with httpx.stream("POST", f"{self.url}/api/pull", json={"model": self.model, "stream": True},
                           timeout=None) as r:
             if r.status_code != 200:
@@ -67,8 +68,9 @@ class OllamaProvider:
                     if pct - last.get(key, -10.0) >= 10:
                         log(f"  {msg.get('status', '')}: {pct:.0f}% of {total / 1e9:.2f} GB")
                         last[key] = pct
-                elif msg.get("status"):
+                elif msg.get("status") and msg["status"] != last_status:   # Ollama repeats statuses
                     log(f"  {msg['status']}")
+                    last_status = msg["status"]
 
     def complete_json(self, system: str, user: str, schema: dict, temperature: float,
                       max_tokens: int) -> tuple[str, dict]:

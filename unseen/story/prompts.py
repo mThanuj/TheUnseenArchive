@@ -123,7 +123,9 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
         "(the device, and how it moves or that it is fixed); lighting and colours; any change during the shot.\n"
         "- Something must visibly move or change for the whole shot (a light, a door, a figure, the camera).\n"
         "- Prefer distant or partly hidden figures, silhouettes, doorways, corridors, weather, light.\n"
-        "- Avoid: readable text or signs, close-ups of hands handling objects, crowds, faces in close-up, gore.\n"
+        "- Avoid: readable text or signs, numbers, clock times, digital readouts and nameplates (the narration "
+        "can say the number; the shot shows the object), close-ups of hands handling objects, crowds, faces in "
+        "close-up, gore.\n"
         f"- Never use these words: {', '.join(r.video_prompt_banned_words)} (grain, tape damage and the "
         "on-screen overlay are added in post-production). Never describe sound.",
         "sfx: 1-3 cues per scene placed where the action happens (a door opening, footsteps, a hum that "
@@ -151,16 +153,22 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
                      "arresting documented detail from the claims (a last message, a number, what was found); "
                      "exact quoted words are allowed only if they appear in that claim's source quote. Tell it in "
                      "order: what happened, what was found, what remains unexplained; hedged theories come last.")
-        parts.append("Real case era: the footage is EITHER period footage shot around the event (only devices "
-                     "that existed then; before ~1925 no film camera existed) OR a present-day revisit of the "
-                     "place (recorded_year = this year, modern devices) narrated over what remains today. "
-                     "Pick one and keep every scene consistent with it. Visual details of real places and "
-                     "objects must match the claims marked [visual]; never invent their appearance.")
+        parts.append("Real case look: ONE consistent look for the whole Reel. If the event happened after cameras "
+                     "existed, the footage is EITHER period footage shot around the event (only devices that existed "
+                     "then, at most two device types) OR a present-day revisit of the place (recorded_year = this "
+                     "year). If it happened before cameras existed (before ~1925), it is a present-day dramatized "
+                     "reconstruction filmed in ONE device style (film_16mm documentary look) for every scene, or a "
+                     "present-day revisit showing the place as it is today without period people; never a phone or "
+                     "camcorder inside a historical scene. Visual details of real places and objects must match the "
+                     "claims marked [visual]; never invent their appearance.")
         parts.append("Real case rules: every factual narration line lists the claim_ids it relies on (at least two "
                      "thirds of the lines cite claims; the rest are short scene-setting with no facts in them). "
-                     "Claims tagged disputed/theory/legend must be hedged in the line (reportedly, some believe, "
-                     "according to...). Never add facts that are not in the claims: no invented times, dates, counts, "
-                     "measurements, readings, logs, vehicles, witnesses, signs or objects. Refer to private people by "
+                     "Claims tagged theory/disputed are hedged in every line that uses them (reportedly, some "
+                     "believe, according to...). A legend is framed ONCE, in the first line that tells it (e.g. "
+                     "'According to two medieval chroniclers, ...'); after that, tell it plainly in the Archivist's "
+                     "voice and do not repeat 'according to legend'. Never add facts that are not in the claims: no "
+                     "invented times, dates, counts, measurements, readings, logs, vehicles, witnesses, signs or "
+                     "objects. Refer to private people by "
                      "their role (the photographer, his daughter, a crew member), not by name, unless they are "
                      "long-dead historical figures; never speculate about anyone's guilt or character. Visuals are "
                      "a dramatized reconstruction.\nClaims:\n" + _claims_block(claims or []))
@@ -168,6 +176,10 @@ def script_prompt(cfg: StoryConfig, category: str, target_seconds: int, concept:
 
 
 def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
+    real = (" This is a REAL case retold from sourced claims: hedges on theories and disputed points, one "
+            "framing of a legend, and the absence of invented clues are requirements, not flaws (flag only "
+            "repetitive hedging). Judge how gripping the documented facts are made, not whether more drama "
+            "could be invented." if category == "real_mystery" else "")
     return (f"Critique this Reel script ({CATEGORY_BRIEF[category]}) as a demanding horror editor and as a "
             f"text-to-video specialist. Be harsh and calibrated: typical first drafts score 5-7; 8 means "
             f"strong; 9-10 only for work you would publish today unchanged. In issues, list concrete, "
@@ -175,7 +187,7 @@ def critique_prompt(cfg: StoryConfig, draft: StoryDraft, category: str) -> str:
             f"(the same action in several scenes), an anomaly that is only heard or narrated but never seen, "
             f"a twist without a visual clue, narrator perspective slips, confusing continuity, shots a video "
             f"model will render badly (text, hands, crowds, close-up faces, too much happening), an ending that "
-            f"does not land. verdict = 'revise' if any score is below 7.\n\n{draft.model_dump_json()}")
+            f"does not land. verdict = 'revise' if any score is below 7.{real}\n\n{draft.model_dump_json()}")
 
 
 def revise_prompt(base_prompt: str, draft: StoryDraft, critique: Critique, checks: list[str] | None = None) -> str:
@@ -225,6 +237,8 @@ def line_repair_prompt(cfg: StoryConfig, draft: StoryDraft, issues: dict[int, st
              f"(max {cfg.rules.narration_line_max_words} words per line):\n{todo}",
              "Return one entry per listed line id."]
     if category == "real_mystery":
+        parts.append("Keep any hedge a line already has (reportedly, according to, theory...); a legend only needs "
+                     "its framing once, so don't add 'according to legend' to lines that already sit inside it.")
         parts.append("Claims you may cite (claim_ids); never add facts beyond them:\n" + _claims_block(claims or []))
     return "\n\n".join(parts)
 

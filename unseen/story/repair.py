@@ -12,8 +12,8 @@ import re
 
 from .config import StoryConfig
 from .models import Claim, LineFixes, SceneFixes, StoryDraft, StoryPatch
-from .validate import (banned_in, first_person_slip, min_cited, readable_text_risk, sanitize_video_prompt,
-                       speech_seconds, uncited_specific, words)
+from .validate import (banned_in, device_mix_issues, first_person_slip, min_cited, readable_text_risk,
+                       sanitize_video_prompt, speech_seconds, uncited_specific, unhedged_lines, words)
 
 OSD_DATE_TIME = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?|"
                            r"\b(?:19|20)\d{2}\b")
@@ -129,7 +129,8 @@ def auto_fix(d: StoryDraft, cfg: StoryConfig, target: float) -> list[str]:
 
 
 def scene_issues(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int | None) -> dict[int, str]:
-    """Scenes whose device or video prompt must be rewritten (anachronism, readable text)."""
+    """Scenes whose device or video prompt must be rewritten (anachronism, readable text, a real case
+    mixing too many device looks)."""
     issues: dict[int, list[str]] = {}
     since = {dev.id: dev.since for dev in cfg.ingredients.device}
     for s in d.scenes:
@@ -139,6 +140,8 @@ def scene_issues(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int
         text = readable_text_risk(s.video_prompt, cfg.rules.video_prompt_text_risk)
         if text:
             issues.setdefault(s.id, []).append(f"remove readable text {text}; show objects without legible writing")
+    for i, why in device_mix_issues(d, cfg, category, event_year).items():
+        issues.setdefault(i, []).append(why + "; describe the shot as filmed with that device")
     return {i: "; ".join(v) for i, v in issues.items()}
 
 
@@ -192,11 +195,11 @@ def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
     if category == "real_mystery":
         by_id = {c.id: c for c in claims or []}
         cited = [n for n in d.narration if n.claim_ids]
+        unhedged = unhedged_lines(d, cfg, claims)
         for n in d.narration:
-            tags = {by_id[c].tag for c in n.claim_ids if c in by_id}
-            if tags & {"disputed", "theory", "legend"} and not banned_in(n.text, cfg.real_mystery.hedge_words):
+            if n.id in unhedged:
                 add(n.id, "hedge it (reportedly / some believe / according to): it relies on a "
-                          + "/".join(sorted(tags - {"fact"})) + " claim")
+                          + "/".join(unhedged[n.id]) + " claim")
             if any(c not in by_id for c in n.claim_ids):
                 add(n.id, "uses unknown claim ids; cite only the listed claims")
             if uncited_specific(n):
@@ -209,21 +212,23 @@ def line_issues(d: StoryDraft, cfg: StoryConfig, target: float, category: str,
     return {i: "; ".join(v) for i, v in issues.items()}
 
 
-HEDGE_SUFFIX = {"legend": "according to legend", "theory": "according to one theory", "disputed": "reportedly"}
+HEDGE_SUFFIX = {"legend": "reportedly", "disputed": "reportedly", "theory": "according to one theory"}
 
 
 def hedge_lines(d: StoryDraft, cfg: StoryConfig, claims: list[Claim] | None) -> list[str]:
-    """Real cases, last resort after the LLM repair: a line resting on a legend/theory/disputed claim
-    that still reads as fact gets an explicit hedge appended."""
-    by_id = {c.id: c for c in claims or []}
+    """Real cases, deterministic: a line that still states a theory/disputed claim as fact, or tells an
+    unframed legend, gets a short hedge appended (once a legend line is hedged, the legend is framed)."""
     fixed = []
-    for n in d.narration:
-        tags = {by_id[c].tag for c in n.claim_ids if c in by_id}
-        weak = [t for t in ("legend", "theory", "disputed") if t in tags]
-        if weak and not banned_in(n.text, cfg.real_mystery.hedge_words):
-            n.text = f"{n.text.rstrip(' .!')}, {HEDGE_SUFFIX[weak[0]]}."
-            fixed.append(f"line {n.id} -> {n.text}")
-    return fixed
+    done: set[int] = set()
+    while True:   # hedging one legend line frames the legend for the lines after it
+        unhedged = {i: t for i, t in unhedged_lines(d, cfg, claims).items() if i not in done}
+        if not unhedged:
+            return fixed
+        n = next(x for x in d.narration if x.id in unhedged)
+        tag = "theory" if "theory" in unhedged[n.id] else unhedged[n.id][0]
+        n.text = f"{n.text.rstrip(' .!')}, {HEDGE_SUFFIX[tag]}."
+        done.add(n.id)   # never twice, even if the configured hedge words don't include the suffix
+        fixed.append(f"line {n.id} -> {n.text}")
 
 
 def apply_line_fixes(d: StoryDraft, fixes: LineFixes, wanted: set[int], category: str) -> list[str]:

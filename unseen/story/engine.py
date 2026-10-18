@@ -48,9 +48,10 @@ def build_provider(cfg: LLMCfg, name: str, entry: ModelEntry | None = None):
                               think=cfg.ollama.think)
     if name == "gemini":
         from ..llm.gemini import GeminiProvider
-        return GeminiProvider(cfg.gemini.url, (entry or cfg.gemini.models[0]).id, cfg.gemini.timeout_s,
+        e = entry or cfg.gemini.models[0]
+        return GeminiProvider(cfg.gemini.url, e.id, cfg.gemini.timeout_s,
                               thinking_budget=cfg.gemini.thinking_budget,
-                              max_output_tokens=cfg.gemini.max_output_tokens)
+                              max_output_tokens=cfg.gemini.max_output_tokens, generation=e.extra_body)
     if name in cfg.openai_compat:
         from ..llm.openai_compat import OpenAICompatProvider
         c = cfg.openai_compat[name]
@@ -354,6 +355,13 @@ class StoryEngine:
                 return view
         return p
 
+    def minor_provider(self):
+        """Small fix-up calls (line and scene repairs) start on the normal tier, so the best models'
+        small daily quotas (Gemini: 20 requests per model) go to scripts, critiques and fact-checks."""
+        from ..llm.fallback import FallbackProvider
+        p = self.provider
+        return p.minor_view() if isinstance(p, FallbackProvider) else p
+
     def critique(self, draft: StoryDraft, category: str) -> Critique | None:
         user = critique_prompt(self.cfg, draft, category)
         critic = self.critic_provider()
@@ -407,12 +415,17 @@ class StoryEngine:
             fixes = auto_fix(draft, self.cfg, target)
             if fixes:
                 self.log("  auto-fixed: " + "; ".join(fixes))
+            if category == "real_mystery":   # before the length repairs, so they can shorten around it
+                hedged = hedge_lines(draft, self.cfg, claims)
+                if hedged:
+                    self.log("  hedged: " + "; ".join(hedged))
             bad_scenes = scene_issues(draft, self.cfg, category, self.event_year)
             if bad_scenes:
                 self.log(f"  rewriting {len(bad_scenes)} scene(s): "
                          + "; ".join(f"{i}: {w}" for i, w in sorted(bad_scenes.items())))
                 try:
                     scene_fixes, _ = self._gen(SceneFixes, name="scene-repair", temperature=0.5, max_tokens=2500,
+                                               provider=self.minor_provider(),
                                                user=scene_repair_prompt(self.cfg, draft, bad_scenes))
                     apply_scene_fixes(draft, scene_fixes, set(bad_scenes))
                     auto_fix(draft, self.cfg, target)
@@ -426,6 +439,7 @@ class StoryEngine:
             self.log(f"  rewriting {len(issues)} line(s): " + "; ".join(f"{i}: {w}" for i, w in sorted(issues.items())))
             try:
                 fixes_obj, _ = self._gen(LineFixes, name="repair", temperature=0.5, max_tokens=1200,
+                                         provider=self.minor_provider(),
                                          user=line_repair_prompt(self.cfg, draft, issues, category, claims))
             except LLMError as exc:
                 self.log(f"  line repair failed: {str(exc)[:200]}")

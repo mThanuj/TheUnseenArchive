@@ -67,13 +67,28 @@ FIRST_PERSON = re.compile(r"\bI\b|\b(?i:me|my|mine|myself)\b")
 
 
 QUOTED = re.compile(r'["“”][^"“”]{1,40}["“”]|(?<![\w])\'[^\']{1,30}\'(?![\w])')
+CLOCK_TIME = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b")
 
 
 def readable_text_risk(prompt: str, risk_words: list[str]) -> list[str]:
-    """Words/quotes that ask the video model to render legible text (it renders gibberish)."""
+    """Words/quotes/clock times that ask the video model to render legible text (it renders gibberish)."""
     found = banned_in(prompt, risk_words)
     found += [m.group(0) for m in QUOTED.finditer(prompt)]
+    found += [m.group(0) for m in CLOCK_TIME.finditer(prompt)]
     return found
+
+
+def device_mix_issues(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int | None) -> dict[int, str]:
+    """Real cases keep one look: a single device for events before any camera existed (a phone inside
+    a 12th-century scene breaks the reconstruction), at most two device types otherwise."""
+    if category != "real_mystery" or not d.scenes:
+        return {}
+    first_camera = min(dev.since for dev in cfg.ingredients.device)
+    allowed = 1 if event_year is not None and event_year < first_camera else 2
+    keep = [dev for dev, _ in Counter(s.device for s in d.scenes).most_common(allowed)]
+    rule = "one device for the whole reconstruction" if allowed == 1 else "at most two device types"
+    return {s.id: f"use {keep[0]} like the rest of this reconstruction ({rule})"
+            for s in d.scenes if s.device not in keep}
 
 
 def era_problems(d: StoryDraft, cfg: StoryConfig, category: str, event_year: int | None) -> list[str]:
@@ -113,6 +128,25 @@ def uncited_specific(line) -> bool:
 def min_cited(d: StoryDraft) -> int:
     """Real cases: at least two thirds of the narration lines must cite claims."""
     return max(1, (2 * len(d.narration)) // 3)
+
+
+def unhedged_lines(d: StoryDraft, cfg: StoryConfig, claims: list[Claim] | None) -> dict[int, list[str]]:
+    """Real cases: {line id: tags} for lines stating a theory/disputed claim without a hedge, or telling
+    a legend before it has been framed. A legend needs its framing once ("According to two medieval
+    chroniclers, ..."); later lines are told within that frame, so the narration doesn't repeat
+    "according to legend" on every line. Theories and disputed points are hedged every time."""
+    by_id = {c.id: c for c in claims or []}
+    framed = False
+    out: dict[int, list[str]] = {}
+    for n in d.narration:
+        tags = {by_id[c].tag for c in n.claim_ids if c in by_id}
+        hedged = bool(banned_in(n.text, cfg.real_mystery.hedge_words))
+        need = sorted(tags & {"theory", "disputed"}) + (["legend"] if "legend" in tags and not framed else [])
+        if need and not hedged:
+            out[n.id] = need
+        if "legend" in tags and hedged:
+            framed = True
+    return out
 
 
 def expected_scenes(cfg: StoryConfig, target_seconds: int) -> int:
@@ -191,6 +225,7 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
             problems.append(f"scene {s.id} video_prompt asks for readable text {text}; show the object "
                             f"without legible writing")
     problems += era_problems(d, cfg, category, event_year)
+    problems += [f"scene {i}: {why}" for i, why in device_mix_issues(d, cfg, category, event_year).items()]
 
     # clichés
     text = " ".join([d.logline, *(n.text for n in d.narration)]).lower()
@@ -202,15 +237,15 @@ def validate_story(d: StoryDraft, cfg: StoryConfig, target_seconds: int, categor
     if category == "real_mystery":
         claim_by_id = {c.id: c for c in claims or []}
         cited = 0
+        unhedged = unhedged_lines(d, cfg, claims)
         for n in d.narration:
             missing = [c for c in n.claim_ids if c not in claim_by_id]
             if missing:
                 problems.append(f"narration line {n.id} cites unknown claim ids {missing}")
-            tags = {claim_by_id[c].tag for c in n.claim_ids if c in claim_by_id}
             if n.claim_ids:
                 cited += 1
-            if tags & {"disputed", "theory", "legend"} and not banned_in(n.text, cfg.real_mystery.hedge_words):
-                problems.append(f"narration line {n.id} states a {'/'.join(sorted(tags - {'fact'}))} claim as fact; "
+            if n.id in unhedged:
+                problems.append(f"narration line {n.id} states a {'/'.join(unhedged[n.id])} claim as fact; "
                                 f"hedge it (e.g. 'reportedly', 'some believe', 'according to')")
             if uncited_specific(n):
                 problems.append(f"narration line {n.id} states a specific detail without citing a claim")

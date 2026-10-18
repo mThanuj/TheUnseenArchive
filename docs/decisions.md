@@ -222,3 +222,21 @@ at once: a real-mystery story was saved without its critique and fact-check. Cha
   credits for free users any more, V), Alibaba Model Studio and SiliconFlow (one-time credits, V).
   Not checked (documentation sites unreachable from the authoring sandbox): OVHcloud, Together,
   Fireworks, Hyperbolic, Nebius, Chutes, Vercel AI Gateway, Ollama Cloud, ModelScope.
+
+## M2 round 8 (2026-10-18): what round 7 showed
+
+- Gemini's free tier is **20 requests per day per model** (QuotaFailure
+  `GenerateRequestsPerDayPerProjectPerModel-FreeTier=20`); `gemini-2.5-pro` is not on the free tier
+  (404). Daily quotas reset at midnight US Pacific time. Line and scene repairs (~40% of calls) now
+  start on the normal tier so the best models' requests go to concepts, scripts, critiques and the
+  fact-check.
+- A whole case can be a legend (Green Children of Woolpit: every claim tagged legend). Hedging each
+  line produced "according to legend" on nearly every line. Now a legend is framed once (the first
+  line that tells it); theories and disputed points are still hedged every time. The critic is told
+  hedges are requirements. The deterministic last-resort hedge is a one-word ", reportedly."
+- The same story mixed phone, camcorder and 16mm inside a 12th-century scene. Real cases now keep
+  one device look before cameras existed, at most two device types after.
+- A video prompt asked for "a digital readout flashes 07:45": clock times, readouts and nameplates
+  now count as readable-text risks.
+- Mistral and Cloudflare keys answered 403 without the reason being kept; 403 now disables only that
+  model unless the API's message is about the key/token, and the message is shown.

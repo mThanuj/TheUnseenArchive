@@ -232,3 +232,40 @@ def test_unhedged_theory_lines_get_a_hedge_as_last_resort(cfg):
     d.narration[2].claim_ids = [2]
     assert hedge_lines(d, cfg, claims) == ["line 1 -> Dust analysis shows titanium, according to one theory."]
     assert d.narration[1].text == "Some believe the dust burns."        # already hedged: untouched
+
+
+def test_a_legend_is_framed_once_but_theories_every_time(cfg):
+    from unseen.story.repair import hedge_lines
+    from unseen.story.validate import unhedged_lines
+    claims = [Claim(id=1, text="Two green children appeared.", quote="two green children", tag="legend"),
+              Claim(id=2, text="They came from underground.", quote="from underground", tag="theory")]
+    d = draft()
+    for n in d.narration[:4]:
+        n.claim_ids = [1]
+    d.narration[4].claim_ids = [2]
+    assert unhedged_lines(d, cfg, claims) == {1: ["legend"], 2: ["legend"], 3: ["legend"], 4: ["legend"],
+                                              5: ["theory"]}
+    d.narration[0].text = "According to two medieval chroniclers, the children walked out of a pit."
+    assert unhedged_lines(d, cfg, claims) == {5: ["theory"]}     # framed once: lines 2-4 can be plain
+    d = draft()
+    for n in d.narration[:3]:
+        n.claim_ids = [1]
+    assert hedge_lines(d, cfg, claims) == ["line 1 -> Entry four twelve. The tape starts mid-step, reportedly."]
+    assert d.narration[1].text == "The corridor light was already flickering."   # inside the frame
+
+
+def test_real_cases_keep_one_device_look_and_clock_times_count_as_text(cfg):
+    from unseen.story.repair import scene_issues
+    from unseen.story.validate import device_mix_issues
+    d = draft()
+    d.scenes[2].device = "phone"
+    assert device_mix_issues(d, cfg, "real_mystery", 1150) == {
+        3: "use camcorder like the rest of this reconstruction (one device for the whole reconstruction)"}
+    assert device_mix_issues(d, cfg, "real_mystery", 1981) == {}   # two looks are fine after cameras existed
+    d.scenes[3].device = "cctv"
+    assert set(device_mix_issues(d, cfg, "real_mystery", 1981)) == {4}   # a third look is not
+    assert device_mix_issues(d, cfg, "fiction_horror", None) == {}
+    assert 3 in scene_issues(d, cfg, "real_mystery", 1150)
+    from unseen.story.validate import readable_text_risk
+    assert readable_text_risk("A digital readout flashes 07:45 above the door.",
+                              cfg.rules.video_prompt_text_risk) == ["readout", "07:45"]
